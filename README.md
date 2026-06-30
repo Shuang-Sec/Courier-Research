@@ -70,6 +70,22 @@
 - `evidence-summary.tsv`
 - `sanitization-notes.md`
 - `source-baseline.md`
+- `repo-map.md`
+- `build-matrix.md`
+- `binary-release-policy.md`
+
+---
+
+## 2.1 长期维护文档
+
+为了让这个私有仓库后面更适合长期维护，我补了几份“治理型文档”：
+
+| 文件 | 解决什么问题 |
+|---|---|
+| `CHANGELOG.md` | 这次研究保存到了哪一步、仓库最近加了什么 |
+| `docs/repo-map.md` | 目录和关键文件怎么快速定位 |
+| `docs/build-matrix.md` | 改完哪层代码之后要不要重编 / 重启 / 重新生成 |
+| `docs/binary-release-policy.md` | 哪些文件可以放 release，哪些不要放 |
 
 ---
 
@@ -99,7 +115,10 @@
 2. `docs/build-run-overview.md`
 3. `docs/evidence-summary.tsv`
 4. `docs/source-baseline.md`
-5. `research/memory-loader-lab/README.md`
+5. `docs/repo-map.md`
+6. `docs/build-matrix.md`
+7. `docs/binary-release-policy.md`
+8. `research/memory-loader-lab/README.md`
 
 读完这 5 个文件后，再回头看源码，会更容易理解它们在整条链路里的位置。
 
@@ -157,6 +176,7 @@
 这个去敏快照对应的本地基线信息见：
 
 - `docs/source-baseline.md`
+- `CHANGELOG.md`
 
 其中记录了：
 
@@ -164,4 +184,4 @@
 - 本地基线 tag
 - 导出策略
 - 对应的近期关键 commit 摘要
-
+- 当前仓库后续维护记录
