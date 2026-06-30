@@ -1,0 +1,6 @@
+date	topic	result	artifact	sha256	notes
+2026-06-27	pe_header_scrub	stage_proof_only	loader_agentdll_mmpp_lite.x64.exe	67da10f929cebaae77504aa9910244bfe499f650b1c6c3dcccbb68a151a60e33	证明内存加载后仍可观测到 PE 痕迹，并开始做 header 处理实验
+2026-06-28	profile_only_loader_dhpl1	callback_and_function_matrix	cache.dhpl	bb343fcf0bf7d58afd4bd611b654e47103df65054cc7edffae45e40438da47b4	从完整 DLL 还原转向最小元数据容器
+2026-06-29	aes_gcm_outer_envelope	callback_and_stability	cache.dhpl	85cbe4afee62c52a606cb0d1327a739f22cd45d8d45b77f84dc44454460bdef1	引入 AES-GCM 外层容器保护
+2026-06-29	dhple2_pbkdf2	baseline_stable	loader_profile_only_diag.x64.exe	47a71f693e4e830a7fc9d190a9d8b4f289523a390638b8833932f250f1b1d835	升级为 PBKDF2-HMAC-SHA256 + salt + AES-GCM
+2026-06-29	three_directions_combo	longer_lived_combo	loader_profile_only_diag.x64.exe	8c007387167c0f75a4286cc63090196edaf8a29ce6ff2d41035f9c8a5178f111	组合测试中得到更稳定的一组启动/传输方案

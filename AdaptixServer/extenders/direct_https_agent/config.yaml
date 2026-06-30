@@ -1,0 +1,10 @@
+# 文件作用：Adaptix extender 配置：告诉 teamserver 这个插件叫什么、加载哪个 .so、使用哪个 UI 配置文件。
+extender_type: "agent"
+extender_file: "agent_direct_https.so"
+ax_file: "ax_config.axs"
+
+agent_name: "direct_https"
+agent_watermark: "d17ec7ed"
+listeners:
+  - "BeaconHTTP"
+multi_listeners: false

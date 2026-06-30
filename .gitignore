@@ -1,0 +1,30 @@
+# build / runtime
+out/
+build/
+dist/
+reports/
+__pycache__/
+*.pyc
+
+# local secrets / env
+.adaptix_api.env
+*.local.env
+
+# generated artifacts
+*.exe
+*.dll
+*.bin
+*.dat
+*.pdb
+*.o
+*.a
+*.log
+*.tmp
+*.zip
+*.7z
+*.tar
+*.gz
+
+# OS / editor
+.DS_Store
+Thumbs.db
