@@ -164,6 +164,9 @@ docs/
 | `release-notes-baseline-2026-06-30.md` | 当前 release 的正式说明 |
 | `build-matrix.md` | 改完某层代码后要做哪些动作 |
 | `binary-release-policy.md` | release 资产的准入/禁入规则 |
+| `research-roadmap.md` | 下一阶段准备推进哪些研究方向 |
+| `experiment-template.md` | 新实验记录模板 |
+| `decision-log.md` | 关键架构/流程决策记录 |
 
 ---
 
@@ -199,6 +202,24 @@ docs/
 
 - `docs/binary-release-policy.md`
 
+### 情况 E：我不知道下一阶段应该往哪条线推进
+
+先看：
+
+- `docs/research-roadmap.md`
+
+### 情况 F：我准备开始一个新实验，但不想漏记
+
+先看：
+
+- `docs/experiment-template.md`
+
+### 情况 G：我忘了为什么当时把仓库/流程定成现在这样
+
+先看：
+
+- `docs/decision-log.md`
+
 ---
 
 ## 8. 维护建议
@@ -211,4 +232,3 @@ docs/
 - **发布看 release policy**
 
 这样仓库就不会变成“文件很多，但回头看不懂”的状态。
-

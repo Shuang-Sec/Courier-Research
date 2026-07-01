@@ -73,6 +73,9 @@
 - `repo-map.md`
 - `build-matrix.md`
 - `binary-release-policy.md`
+- `research-roadmap.md`
+- `experiment-template.md`
+- `decision-log.md`
 
 ---
 
@@ -86,6 +89,9 @@
 | `docs/repo-map.md` | 目录和关键文件怎么快速定位 |
 | `docs/build-matrix.md` | 改完哪层代码之后要不要重编 / 重启 / 重新生成 |
 | `docs/binary-release-policy.md` | 哪些文件可以放 release，哪些不要放 |
+| `docs/research-roadmap.md` | 下一阶段还准备往哪几条线推进 |
+| `docs/experiment-template.md` | 每次新实验按什么模板记录 |
+| `docs/decision-log.md` | 关键决策为什么这样定、之后要不要回看 |
 
 ---
 
@@ -112,13 +118,16 @@
 如果是第一次看这个仓库，建议按这个顺序读：
 
 1. `docs/research-summary.md`
-2. `docs/build-run-overview.md`
-3. `docs/evidence-summary.tsv`
-4. `docs/source-baseline.md`
-5. `docs/repo-map.md`
-6. `docs/build-matrix.md`
+2. `docs/repo-map.md`
+3. `docs/build-run-overview.md`
+4. `docs/build-matrix.md`
+5. `docs/research-roadmap.md`
+6. `docs/decision-log.md`
 7. `docs/binary-release-policy.md`
-8. `research/memory-loader-lab/README.md`
+8. `docs/evidence-summary.tsv`
+9. `docs/source-baseline.md`
+10. `docs/experiment-template.md`
+11. `research/memory-loader-lab/README.md`
 
 读完这 5 个文件后，再回头看源码，会更容易理解它们在整条链路里的位置。
 
@@ -177,6 +186,7 @@
 
 - `docs/source-baseline.md`
 - `CHANGELOG.md`
+- `docs/decision-log.md`
 
 其中记录了：
 
@@ -185,3 +195,4 @@
 - 导出策略
 - 对应的近期关键 commit 摘要
 - 当前仓库后续维护记录
+- 关键长期决策

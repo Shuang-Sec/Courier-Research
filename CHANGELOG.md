@@ -17,8 +17,35 @@
 
 ### Planned
 
-- 继续补充仓库治理文档、构建矩阵和 release 资产策略。
-- 后续如新增新的稳定研究节点，优先先写文档，再决定是否单独打 tag / release。
+- 继续按统一模板沉淀新实验记录。
+- 如果后续出现新的稳定里程碑，优先先更新 `CHANGELOG.md` / `docs/decision-log.md`，再决定是否单独打 tag / release。
+
+---
+
+## [2026-07-01-research-ops-docs]
+
+### Added
+
+- 新增 `docs/research-roadmap.md`
+- 新增 `docs/experiment-template.md`
+- 新增 `docs/decision-log.md`
+
+### Changed
+
+- 更新 `README.md`，把路线图、实验模板、决策日志纳入长期维护导航。
+
+### Purpose
+
+- 让后续研究不只“有结果”，而且“有过程”。
+- 让新实验可以按统一模板记录，减少遗漏：
+  - 实验目标
+  - 假设
+  - 改动点
+  - 构建动作
+  - 样本 hash
+  - 证据路径
+  - 结论与下一步
+- 让关键架构/流程决策不再散落在聊天和临时文档里。
 
 ---
 
@@ -112,4 +139,3 @@
    - 打本地 tag
    - 导出新的私有快照
    - 或更新当前 GitHub 私有仓库
-
