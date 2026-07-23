@@ -23,6 +23,7 @@ const (
 	COMMAND_HELLO          = 0x9001
 	COMMAND_JOBS_KILL      = 47
 	COMMAND_LS             = 14
+	COMMAND_DISKS          = 15
 	COMMAND_MV             = 18
 	COMMAND_MKDIR          = 27
 	COMMAND_PS_RUN         = 43

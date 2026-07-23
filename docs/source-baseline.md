@@ -23,3 +23,15 @@
 - `eeaa951` feat: add profile loader release variants
 - `4676edf` feat: checkpoint local baseline for profile-only loader dhple2
 
+## 2026-07-21 WPP/WPS 功能候选快照
+
+最近一次本地功能候选对应：
+
+- 原始本地仓库：`AdaptixC2`
+- 本地分支：`feature/direct-https-minimal-agent`
+- 源码提交：`72e54efee51ee70445344a81c4580142a505b0e2`
+- 本地标签：`release-wpp-functional-v1`
+- 候选范围：F0 文件输出后备、F1 命令执行、F2 文件 CRUD、F3 上传下载
+- 证据目录：`docs/evidence/2026-07-21-wpp-wps-f0-ps-encoding/`
+
+这次更新仍然采用筛选式导出：同步源码、构建脚本、协议测试和去敏报告；最终 Windows/Linux 运行产物只在本地候选目录保存，并用 SHA-256 清单关联。

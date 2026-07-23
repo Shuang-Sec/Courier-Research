@@ -20,6 +20,31 @@
 - 继续按统一模板沉淀新实验记录。
 - 如果后续出现新的稳定里程碑，优先先更新 `CHANGELOG.md` / `docs/decision-log.md`，再决定是否单独打 tag / release。
 
+## [2026-07-23-wpp-wps-f0-f3-source-retention]
+
+### Added
+
+- 新增 `research/wps-krpt-proxy/`，保存 WPP/WPS `krpt.dll` 代理层源码、导出转发脚本和构建入口。
+- 更新 `research/memory-loader-lab/` 到 WPP/WPS 最终候选对应的 loader、packer 和 profile DLL 构建源码。
+- 更新 `AdaptixServer/extenders/direct_https_agent/` 到 `72e54ef` 对应的 direct_https 命令输出、任务清理和协议测试代码。
+- 新增 `docs/evidence/2026-07-21-wpp-wps-f0-ps-encoding/`，保存中文实现说明、WPS DLL 到 Agent 的详细调用链、三次部署摘要和主要文件哈希。
+
+### Changed
+
+- 将研究构建脚本中的本地绝对路径改为仓库根目录推导或环境变量输入。
+- 将测试代码中的固定探测地址改为 `DIRECT_HTTPS_PROBE_HOST` 编译宏，默认值为本地占位地址。
+- 补齐 direct_https Go 依赖的 `go.mod` 校验记录，使全新模块缓存下的测试准备过程可复现。
+- 保持仓库的 source-only / doc-first 规则，最终 `dll/dat/bin/so` 继续由本地候选目录和 SHA-256 清单留存。
+
+### Verification
+
+- WPP/WPS 三次独立新鲜部署：`17/17` 全矩阵。
+- F0 主命令检查：每次 `10/10`。
+- disks：WPP/WPS 均 `2/2`，与靶机实际驱动器匹配。
+- upload/download：内容和 SHA-256 匹配。
+- 新鲜 Qscan：三次 detected `0`、errors `0`。
+- Go 协议测试：`go1.25.4` 下 `go test ./...` 通过。
+
 ---
 
 ## [2026-07-01-research-ops-docs]

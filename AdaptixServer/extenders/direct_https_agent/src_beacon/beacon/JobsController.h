@@ -22,6 +22,7 @@ struct JobData {
     WORD   pidObject;
     HANDLE pipeRead;
     HANDLE pipeWrite;
+    CHAR*  outputPath;
 };
 
 // JobsController 管理所有后台 job。
@@ -31,7 +32,7 @@ public:
 	Vector<JobData> jobs;
 
     // CreateJobData 创建后台 job 记录。
-    JobData CreateJobData(ULONG taskId, WORD Type, WORD State, HANDLE object, WORD pid, HANDLE input, HANDLE output);
+    JobData CreateJobData(ULONG taskId, WORD Type, WORD State, HANDLE object, WORD pid, HANDLE input, HANDLE output, CHAR* outputPath = NULL);
     // ProcessJobs 检查 job 是否结束并读取输出。
     void    ProcessJobs(Packer* packer);
 

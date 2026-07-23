@@ -1,6 +1,6 @@
 /// 文件作用：Adaptix Client 侧 UI/命令配置：定义 direct_https 的可见命令和生成 payload 时的表单。
-/// 恢复后的学习版最小功能面：hello、cmd/powershell、文件 CRUD、upload/download。
-/// 非目标功能（jobs kill、terminate、disks、download pause/resume/cancel 等）继续不暴露，方便单变量测试。
+/// 恢复后的学习版最小功能面：hello、disks、cmd/powershell、文件 CRUD、upload/download。
+/// 非目标功能（jobs kill、terminate、download pause/resume/cancel 等）继续不暴露，方便单变量测试。
 
 let AGENT_NAME = "direct_https";
 
@@ -76,6 +76,8 @@ function RegisterCommands(listenerType)
     let cmd_download = ax.create_command("download", "Download a file", "download C:\\Temp\\file.txt", "Task: download file");
     cmd_download.addArgString("file", true);
 
+    let cmd_disks = ax.create_command("disks", "List logical drives", "disks", "Task: list logical drives");
+
     if(listenerType == "BeaconHTTP")
     {
         let commands_http = ax.create_commands_group(AGENT_NAME, [
@@ -83,7 +85,7 @@ function RegisterCommands(listenerType)
             cmd_cmd, cmd_powershell,
             cmd_pwd, cmd_cd, cmd_ls,
             cmd_cat, cmd_mkdir, cmd_rm, cmd_cp, cmd_mv,
-            cmd_upload, cmd_download
+            cmd_upload, cmd_download, cmd_disks
         ]);
         return { commands_windows: commands_http };
     }

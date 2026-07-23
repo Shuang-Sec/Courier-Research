@@ -1,5 +1,7 @@
 # 文件作用：direct_https_agent 插件构建脚本：编译 Go 插件，并生成 Windows agent 需要的对象文件。
 # all 目标：清理旧 dist，编译 Go 插件，并编译 Windows agent 对象文件。
+DIRECT_HTTPS_BEAT_DIALECT ?= 0
+
 all: clean
 	@ echo "    * Building agent_direct_https plugin"
 	@ mkdir dist
@@ -8,7 +10,7 @@ all: clean
 	@ echo "      done..."
 
 	@ echo "    * Building Direct HTTPS agent objects"
-	@ (cd src_beacon && $(MAKE) --no-print-directory)
+	@ (cd src_beacon && $(MAKE) --no-print-directory DIRECT_HTTPS_BEAT_DIALECT=$(DIRECT_HTTPS_BEAT_DIALECT))
 	@ mv src_beacon/objects_http ./dist/objects_http
 	@ echo "      done..."
 

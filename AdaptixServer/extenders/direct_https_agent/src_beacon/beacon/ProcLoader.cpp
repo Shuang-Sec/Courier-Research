@@ -52,7 +52,7 @@ HMODULE GetModuleAddress(ULONG modHash)
     LIST_ENTRY* pStartListEntry = ModuleList->Flink;
 
     for (LIST_ENTRY* pListEntry = pStartListEntry; pListEntry != ModuleList; pListEntry = pListEntry->Flink) {
-        LDR_DATA_TABLE_ENTRY* pEntry = (LDR_DATA_TABLE_ENTRY*)((BYTE*)pListEntry - sizeof(LIST_ENTRY));
+        LDR_DATA_TABLE_ENTRY* pEntry = (LDR_DATA_TABLE_ENTRY*)((BYTE*)pListEntry - FIELD_OFFSET(LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks));
         if ( Djb2W((PWCHAR)pEntry->BaseDllName.Buffer) == modHash )
             return (HMODULE)pEntry->DllBase;
     }

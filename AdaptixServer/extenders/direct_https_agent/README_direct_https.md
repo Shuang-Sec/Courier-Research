@@ -22,15 +22,16 @@
 - 文件能力 opcode 保留为：`COMMAND_PWD`、`COMMAND_CD`、`COMMAND_LS`、`COMMAND_CAT`、`COMMAND_MKDIR`、`COMMAND_RM`、`COMMAND_COPY`/`COMMAND_CP`、`COMMAND_MV`、`COMMAND_DOWNLOAD`、`COMMAND_UPLOAD`。
 - `COMMAND_SAVEMEMORY` 仅服务于 `upload` 的分片传输，不在 `ax_config.axs` 中暴露为 operator 命令。
 - `COMMAND_DOWNLOAD_STATE` 仅用于下载状态上报，不作为 server→agent 的可达控制 handler。
-- 已移除/不暴露的历史能力（例如 `disks`、`exfil`）不应保留 server task 生成逻辑或 agent dispatch handler。
+- 当前 v1 已注册 `disks`；后台 job 控制、terminate 和下载状态控制等未纳入 release 的历史接口不作为 operator 命令暴露。
 
 ## 构建
 
 ```bash
-cd ${REPO_ROOT}/AdaptixServer/extenders/direct_https_agent
-export PATH=${LAB_BASE}/tools/go/bin:${LAB_BASE}/tools/mingw/usr/bin:$PATH
-export GOCACHE=${LAB_BASE}/tools/gocache
-export GOPATH=${LAB_BASE}/tools/gopath
+export REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd AdaptixServer/extenders/direct_https_agent
+export PATH="$REPO_ROOT/tools/go/bin:$REPO_ROOT/tools/mingw/usr/bin:$PATH"
+export GOCACHE="$REPO_ROOT/tools/gocache"
+export GOPATH="$REPO_ROOT/tools/gopath"
 export GOPROXY=off
 make clean && make
 ```
@@ -38,18 +39,18 @@ make clean && make
 构建产物：
 
 ```text
-${REPO_ROOT}/AdaptixServer/extenders/direct_https_agent/dist/agent_direct_https.so
-${REPO_ROOT}/AdaptixServer/extenders/direct_https_agent/dist/objects_http/
+AdaptixServer/extenders/direct_https_agent/dist/agent_direct_https.so
+AdaptixServer/extenders/direct_https_agent/dist/objects_http/
 ```
 
 运行部署目录：
 
 ```text
-${REPO_ROOT}/dist/extenders/direct_https_agent/
+dist/extenders/direct_https_agent/
 ```
 
 运行 profile：
 
 ```text
-${REPO_ROOT}/dist/profile-direct-https.yaml
+dist/profile-direct-https.yaml
 ```

@@ -13305,6 +13305,89 @@ RtlCreateUserProcess(
     PRTL_USER_PROCESS_INFORMATION ProcessInformation
     );
 
+// NtCreateUserProcess uses private process-creation structures that are not
+// exposed by the reduced Windows headers used by this beacon.
+typedef enum _DIRECT_HTTPS_PS_CREATE_STATE {
+	DirectHttpsPsCreateInitialState,
+	DirectHttpsPsCreateFailOnFileOpen,
+	DirectHttpsPsCreateFailOnSectionCreate,
+	DirectHttpsPsCreateFailExeFormat,
+	DirectHttpsPsCreateFailMachineMismatch,
+	DirectHttpsPsCreateFailExeName,
+	DirectHttpsPsCreateSuccess,
+	DirectHttpsPsCreateMaximumStates
+} DIRECT_HTTPS_PS_CREATE_STATE;
+
+typedef struct _DIRECT_HTTPS_PS_ATTRIBUTE {
+	ULONG_PTR Attribute;
+	SIZE_T Size;
+	union {
+		ULONG_PTR Value;
+		PVOID ValuePtr;
+	};
+	PSIZE_T ReturnLength;
+} DIRECT_HTTPS_PS_ATTRIBUTE, *PDIRECT_HTTPS_PS_ATTRIBUTE;
+
+typedef struct _DIRECT_HTTPS_PS_ATTRIBUTE_LIST {
+	SIZE_T TotalLength;
+	DIRECT_HTTPS_PS_ATTRIBUTE Attributes[1];
+} DIRECT_HTTPS_PS_ATTRIBUTE_LIST, *PDIRECT_HTTPS_PS_ATTRIBUTE_LIST;
+
+typedef struct _DIRECT_HTTPS_PS_CREATE_INFO {
+	SIZE_T Size;
+	DIRECT_HTTPS_PS_CREATE_STATE State;
+	union {
+		struct {
+			ULONG InitFlags;
+			ACCESS_MASK AdditionalFileAccess;
+		} InitState;
+		struct {
+			HANDLE FileHandle;
+		} FailSection;
+		struct {
+			USHORT DllCharacteristics;
+		} ExeFormat;
+		struct {
+			HANDLE IFEOKey;
+		} ExeName;
+		struct {
+			ULONG OutputFlags;
+			HANDLE FileHandle;
+			HANDLE SectionHandle;
+			ULONGLONG UserProcessParametersNative;
+			ULONG UserProcessParametersWow64;
+			ULONG CurrentParameterFlags;
+			ULONGLONG PebAddressNative;
+			ULONG PebAddressWow64;
+			ULONGLONG ManifestAddress;
+			ULONG ManifestSize;
+		} SuccessState;
+	};
+} DIRECT_HTTPS_PS_CREATE_INFO, *PDIRECT_HTTPS_PS_CREATE_INFO;
+
+#define DIRECT_HTTPS_PROCESS_CREATE_FLAGS_BREAKAWAY 0x00000001UL
+#define DIRECT_HTTPS_PROCESS_CREATE_FLAGS_INHERIT_HANDLES 0x00000004UL
+#define DIRECT_HTTPS_PROCESS_CREATE_FLAGS_SUSPENDED 0x00000200UL
+#define DIRECT_HTTPS_PROCESS_CREATE_FLAGS_FORCE_BREAKAWAY 0x00000400UL
+#define DIRECT_HTTPS_PS_ATTRIBUTE_IMAGE_NAME \
+	((ULONG_PTR)5 | 0x00020000UL)
+
+NTSTATUS
+NTAPI
+NtCreateUserProcess(
+	PHANDLE ProcessHandle,
+	PHANDLE ThreadHandle,
+	ACCESS_MASK ProcessDesiredAccess,
+	ACCESS_MASK ThreadDesiredAccess,
+	POBJECT_ATTRIBUTES ProcessObjectAttributes,
+	POBJECT_ATTRIBUTES ThreadObjectAttributes,
+	ULONG ProcessFlags,
+	ULONG ThreadFlags,
+	PVOID ProcessParameters,
+	PDIRECT_HTTPS_PS_CREATE_INFO CreateInfo,
+	PDIRECT_HTTPS_PS_ATTRIBUTE_LIST AttributeList
+	);
+
 NTSTATUS
 NTAPI
 RtlCreateUserThread(

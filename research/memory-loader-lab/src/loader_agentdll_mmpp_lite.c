@@ -21,7 +21,7 @@
 typedef DWORD (WINAPI *RunAgentDllFn)(void);
 
 #ifndef MMPP_XOR_KEY
-#define MMPP_XOR_KEY "CHANGE_ME_MEMORY_LOADER_KEY"
+#define MMPP_XOR_KEY "ctf-memory-loader-key-20260624"
 #endif
 
 #ifndef MMPP_HEADER_SCRUB_MODE

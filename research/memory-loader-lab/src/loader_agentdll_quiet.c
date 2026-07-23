@@ -17,7 +17,7 @@
 typedef DWORD (WINAPI *RunAgentDllFn)(void);
 
 #ifndef QUIET_XOR_KEY
-#define QUIET_XOR_KEY "CHANGE_ME_MEMORY_LOADER_KEY"
+#define QUIET_XOR_KEY "ctf-memory-loader-key-20260624"
 #endif
 
 // heap_alloc：用进程默认堆申请内存，减少对 C runtime malloc 的依赖。

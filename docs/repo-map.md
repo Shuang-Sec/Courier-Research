@@ -232,3 +232,36 @@ docs/
 - **发布看 release policy**
 
 这样仓库就不会变成“文件很多，但回头看不懂”的状态。
+
+## 9. 2026-07-21 WPP/WPS 候选归档
+
+### WPS 宿主代理层
+
+目录：
+
+```text
+research/wps-krpt-proxy/
+```
+
+入口顺序：
+
+1. `krpt_proxy_agent.c`：宿主 DLL 的 `DllMain` 和线程入口。
+2. `build-krpt-proxy.sh`：将 loader 对象和代理层链接成 `krpt.dll`。
+3. `gen_krpt_def.py`：根据原始 DLL 导出表生成 forwarder。
+4. `research/memory-loader-lab/src/loader_profile_only.c`：解密和手工映射 profile 容器。
+5. `research/memory-loader-lab/src/direct_https_dll_entry.cpp`：`RunAgentDll -> AgentMain` 包装入口。
+
+### 最终候选证据
+
+目录：
+
+```text
+docs/evidence/2026-07-21-wpp-wps-f0-ps-encoding/
+```
+
+推荐先看：
+
+- `README.md`
+- `ARTIFACTS-AND-RUNS.md`
+- `WPS-DLL-TO-AGENT-CACHE-DAT-DETAILED.md`
+- `RESULT.md`

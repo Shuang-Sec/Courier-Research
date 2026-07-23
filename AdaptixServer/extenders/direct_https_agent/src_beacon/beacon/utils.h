@@ -16,8 +16,11 @@ void MemFreeLocal(LPVOID* buffer, DWORD bufferSize);
 
 //////////
 
-// ReadDataFromAnonPipe 读取子进程管道输出。
-BYTE* ReadDataFromAnonPipe(HANDLE hPipe, ULONG* bufferSize);
+// ReadDataFromAnonPipe 读取子进程管道输出；regularFile 为普通文件 fallback。
+BYTE* ReadDataFromAnonPipe(HANDLE hPipe, ULONG* bufferSize, BOOL regularFile = FALSE);
+
+// NormalizeProcessOutput 把 PowerShell 文件重定向产生的 UTF-16LE 输出转成 OEM code page。
+BYTE* NormalizeProcessOutput(BYTE* buffer, ULONG* bufferSize);
 
 //////////
 

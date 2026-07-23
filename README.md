@@ -9,6 +9,7 @@
 - `profile-only loader` 设计与实现
 - `DHPL1 -> AES-GCM -> DHPLE2(PBKDF2 + salt + AES-GCM)` 容器演进
 - PE header 痕迹处理与内存形态验证
+- WPP/WPS `krpt.dll` 代理层、`cache.dat` 加密容器和 direct_https Agent 回连链路
 
 这个仓库的目标不是保留本地全部运行环境，而是提供一个**可追溯、可阅读、可二次整理**的源码与文档基线。
 
@@ -54,6 +55,14 @@
 - DLL payload 构建辅助脚本
 - 第三方 loader 裁剪版
 
+### `research/wps-krpt-proxy/`
+保存 WPP/WPS 宿主代理层：
+
+- `krpt.dll` / `krpt.agent.dll` 入口包装
+- 原始 `krpt.dll` 导出 forwarder 生成
+- `DllMain -> loader thread -> dhpl_loader_main` 调用链
+- 带诊断和精简诊断两套构建入口
+
 ### `scripts/`
 保存复现实验时会用到的辅助脚本：
 
@@ -76,6 +85,10 @@
 - `research-roadmap.md`
 - `experiment-template.md`
 - `decision-log.md`
+- `evidence/2026-07-21-wpp-wps-f0-ps-encoding/`
+  - 三次独立部署的最终结果摘要
+  - WPS DLL 到 Agent 的逐函数说明
+  - 构建产物 SHA-256 和 Kaspersky 门禁摘要
 
 ---
 
@@ -111,6 +124,11 @@
 4. **已经把 PE header 痕迹问题从“看见问题”推进到了“结构性处理”阶段**
    - 当前仓库里保留了对应源码、脚本和文档说明。
 
+5. **WPP/WPS 主宿主的功能版候选已经完成 F0-F3 验证**
+   - 最新候选覆盖当前注册的 14 项命令。
+   - 三次独立新鲜部署均完成 WPP/WPS 主宿主矩阵、文件传输和 Kaspersky 门禁。
+   - 详细证据入口：[2026-07-21 WPP/WPS F0-F3 evidence](docs/evidence/2026-07-21-wpp-wps-f0-ps-encoding/README.md)
+
 ---
 
 ## 4. 推荐阅读顺序
@@ -128,6 +146,8 @@
 9. `docs/source-baseline.md`
 10. `docs/experiment-template.md`
 11. `research/memory-loader-lab/README.md`
+12. `research/wps-krpt-proxy/README.md`
+13. `docs/evidence/2026-07-21-wpp-wps-f0-ps-encoding/README.md`
 
 读完这 5 个文件后，再回头看源码，会更容易理解它们在整条链路里的位置。
 

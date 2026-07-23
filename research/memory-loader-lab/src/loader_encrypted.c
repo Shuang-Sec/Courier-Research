@@ -54,7 +54,7 @@ int main(int argc, char** argv)
 {
     const char* binPath = argc > 1 ? argv[1] : "hello_payload.x64.bin";
     const char* outPath = argc > 2 ? argv[2] : "C:\\Users\\Public\\memory_loader_lab\\encrypted_loader_result.txt";
-    const char* key = argc > 3 ? argv[3] : "CHANGE_ME_MEMORY_LOADER_KEY";
+    const char* key = argc > 3 ? argv[3] : "ctf-memory-loader-key-20260624";
     unsigned char* payload = NULL;
     size_t payloadSize = 0;
 

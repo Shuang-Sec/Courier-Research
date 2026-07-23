@@ -35,14 +35,14 @@ direct_https AgentMain -> RunAgentDll export -> encrypted bin -> MemoryLoadLibra
 ## Build hello DLL 和基础 loader
 
 ```bash
-cd ${REPO_ROOT}/research/memory-loader-lab
+cd research/memory-loader-lab
 make clean all
 ```
 
 ## Build direct_https sleep-only DLL probe
 
 ```bash
-cd ${REPO_ROOT}/research/memory-loader-lab
+cd research/memory-loader-lab
 ./build_direct_https_sleep_dll.sh
 ```
 
@@ -60,8 +60,8 @@ DIRECT_HTTPS_DELAY_BEFORE_SEND_MS=5000
 ```powershell
 mkdir C:\Users\Public\memory_loader_lab
 .\loader_plain.x64.exe .\hello_payload.x64.dll C:\Users\Public\memory_loader_lab\plain_loader_result.txt
-.\loader_encrypted.x64.exe .\hello_payload.x64.bin C:\Users\Public\memory_loader_lab\encrypted_loader_result.txt CHANGE_ME_MEMORY_LOADER_KEY
-.\loader_agentdll_encrypted.x64.exe .\direct_https_agent_sleep.x64.bin CHANGE_ME_MEMORY_LOADER_KEY
+.\loader_encrypted.x64.exe .\hello_payload.x64.bin C:\Users\Public\memory_loader_lab\encrypted_loader_result.txt ctf-memory-loader-key-20260624
+.\loader_agentdll_encrypted.x64.exe .\direct_https_agent_sleep.x64.bin ctf-memory-loader-key-20260624
 ```
 
 期望 `loader_agentdll_encrypted.x64.exe` 输出：

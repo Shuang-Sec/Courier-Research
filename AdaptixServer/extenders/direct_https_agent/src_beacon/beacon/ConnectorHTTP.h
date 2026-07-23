@@ -128,6 +128,9 @@ public:
 	DWORD ProbeRequestStage(ULONG stage, BOOL forcePlainHttp8000);
 
 private:
+	// EnsureWininetApis 延迟加载 wininet.dll 并解析基础 WinINet API。
+	BOOL EnsureWininetApis();
+
 	// EnsureHttpSendRequestA 是老师建议的“延迟初始化 API”实验入口：
 	// 构造函数里可以先不解析 HttpSendRequestA，真正要发请求前再解析它。
 	BOOL EnsureHttpSendRequestA();

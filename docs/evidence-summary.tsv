@@ -4,3 +4,5 @@ date	topic	result	artifact	sha256	notes
 2026-06-29	aes_gcm_outer_envelope	callback_and_stability	cache.dhpl	85cbe4afee62c52a606cb0d1327a739f22cd45d8d45b77f84dc44454460bdef1	引入 AES-GCM 外层容器保护
 2026-06-29	dhple2_pbkdf2	baseline_stable	loader_profile_only_diag.x64.exe	47a71f693e4e830a7fc9d190a9d8b4f289523a390638b8833932f250f1b1d835	升级为 PBKDF2-HMAC-SHA256 + salt + AES-GCM
 2026-06-29	three_directions_combo	longer_lived_combo	loader_profile_only_diag.x64.exe	8c007387167c0f75a4286cc63090196edaf8a29ce6ff2d41035f9c8a5178f111	组合测试中得到更稳定的一组启动/传输方案
+2026-07-21	wpp_wps_f0_f3_functional_release	three_fresh_deployments_passed	cache.dat	5c89811ade759d5c1c6cc25f153357931f66320160da63e77c055c7d2193961b	WPP/WPS 主宿主完成 14 项注册命令、三层 Kaspersky 门禁和文件传输哈希核对
+2026-07-21	krpt_proxy_agent_chain	wpp_wps_host_integration	krpt.dll	b4bb6f1171cb80e9514c767110a3bb68c7e9a3688b9887f423d0fceb1cc46bac	DllMain -> loader thread -> DHPLE2 -> DHPL1 -> RunAgentDll -> AgentMain

