@@ -8,7 +8,7 @@
 
 最重要的结论有四个：
 
-1. WPS 直接加载的是 `krpt.dll` 或 `krpt.agent.dll`，不是 `agent_direct_https.so`。
+1. 本次实时验证中，WPS 实际加载的是 `krpt.dll`，没有加载 `krpt.agent.dll`；它也不是 `agent_direct_https.so`。
 2. `agent_direct_https.so` 是 Teamserver 侧的 Adaptix 插件；WPS 靶机侧真正执行的 Windows Agent 代码位于 `direct_https_profile.x64.dll`，随后被打包进 `cache.dat`。
 3. `krpt.dll` 自身主要承担“宿主接入 + 启动 loader”职责。它先通过 `DllMain` 创建工作线程，再调用被重命名为 `dhpl_loader_main()` 的 loader 入口。
 4. loader 读取 `cache.dat`，用 AES-256-GCM 解密出 DHPL1 容器，手工把 profile DLL 的各个 section 映射到内存，完成重定位、导入、TLS、异常表和初始化，最后调用 `RunAgentDll()`；`RunAgentDll()` 再转到 `AgentMain(NULL)`。
@@ -45,7 +45,6 @@ flowchart TD
 | 文件 | 所在位置 | 主要角色 |
 |---|---|---|
 | `krpt.dll` | WPP/WPS 目录 | 自研代理 DLL；保留原始 `krpt.dll` 的导出，同时启动 DHPL loader |
-| `krpt.agent.dll` | WPP/WPS 目录 | 当前候选中与 `krpt.dll` 完全相同的副本，用于覆盖另一种宿主文件名路径 |
 | `krpt_orig.dll` | WPP/WPS 目录 | 从靶机备份的原始 WPS `krpt.dll`，供导出转发使用 |
 | `cache.dat` | WPP/WPS 目录 | DHPLE2 外层加密文件，里面是 DHPL1 容器，不是普通 PE 文件 |
 | `direct_https_profile.x64.dll` | Linux 构建/报告目录 | 从 direct_https C++ Agent 对象链接出来的 Windows profile DLL，作为 `cache.dat` 的输入 |
@@ -194,23 +193,26 @@ static DWORD WINAPI agent_loader_thread(LPVOID param)
     -> AgentMain(NULL)
 ```
 
-### 3.5 `krpt.agent.dll` 的作用
+### 3.5 为什么后续只保留 `krpt.dll`
 
-最终构建脚本在 [build-krpt-proxy.sh](research/wps-krpt-proxy/build-krpt-proxy.sh:49) 执行：
+前一版候选曾经把同一个文件复制成两个名字，因此历史目录中可以看到 `krpt.dll` 和 `krpt.agent.dll`，两者当时的 SHA-256 也相同。这只是构建脚本的兼容性副本，不是第二套 Agent，也没有第二个入口逻辑。
 
-```bash
-cp -f "$OUT/krpt.dll" "$OUT/krpt.agent.dll"
-```
-
-所以最终候选中两个文件是字节级相同的副本：
+随后对正在运行的 WPS 进程做了实时模块枚举。证据时间为 `2026-07-23 21:33:02`，本次快照中发现 3 个 `wps.exe` 进程，全部加载：
 
 ```text
-krpt.dll       50688 bytes
-krpt.agent.dll 50688 bytes
-SHA-256        b4bb6f1171cb80e9514c767110a3bb68c7e9a3688b9887f423d0fceb1cc46bac
+...\office6\krpt.dll
 ```
 
-两个名字是为了适配 WPP/WPS 侧可能使用的不同模块名路径；由哪个宿主路径实际触发加载，由宿主本身的模块依赖决定。
+同一份模块列表中没有 `krpt.agent.dll`。完整记录见 [module-load-evidence-20260723.md](LOCAL_CANDIDATE_ROOT/module-load-evidence-20260723.md)。这份运行时证据比旧的文件清单更能说明哪个 DLL 真正参与了 WPS 进程。
+
+因此从下一候选开始执行以下规则：
+
+1. 构建脚本只生成 `krpt.dll`。
+2. 输出目录如果残留旧候选的 `krpt.agent.dll`，构建脚本会先清理它。
+3. 部署脚本只部署、静态扫描和计算 `cache.dat`、`krpt.dll`。
+4. 远程 WPS 目录中如果存在旧的 `krpt.agent.dll`，新部署开始前会将其移除，避免把历史副本误认为当前加载模块。
+
+旧 `release-wpp-functional-v1` 目录中的 `krpt.agent.dll`、旧哈希和旧扫描报告仍作为历史实验留存；它们说明上一版候选曾经生成过副本，不代表后续版本仍会生成或部署该文件。
 
 ## 4. `cache.dat` 是什么，不是什么
 
@@ -908,14 +910,13 @@ T26 服务端注册 Agent，UI 可以下发命令
 sha256sum \
   cache.dat \
   krpt-build/krpt.dll \
-  krpt-build/krpt.agent.dll \
   profile_dll/direct_https_profile.x64.dll \
   agent_direct_https.so
 ```
 
 重点检查：
 
-- `krpt.dll` 与 `krpt.agent.dll` hash 相同。
+- 新候选输出中只应出现 `krpt.dll`，不应再出现旧别名文件。
 - 远程 WPP/WPS 目录的 `cache.dat` hash 与报告中的 `5c898...3961b` 相同。
 - 远程 `krpt.dll` hash 与报告中的 `b4bb...46bac` 相同。
 
@@ -1023,11 +1024,12 @@ LOCAL_CANDIDATE_ROOT/release-wpp-functional-v1
 
 - [cache.dat](LOCAL_CANDIDATE_ROOT/release-wpp-functional-v1/cache.dat)
 - [krpt.dll](LOCAL_CANDIDATE_ROOT/release-wpp-functional-v1/krpt.dll)
-- [krpt.agent.dll](LOCAL_CANDIDATE_ROOT/release-wpp-functional-v1/krpt.agent.dll)
 - [direct_https_profile.x64.dll](LOCAL_CANDIDATE_ROOT/release-wpp-functional-v1/profile_dll/direct_https_profile.x64.dll)
 - [profile.bin](LOCAL_CANDIDATE_ROOT/release-wpp-functional-v1/profile_dll/profile.bin)
 - [agent_direct_https.so](LOCAL_CANDIDATE_ROOT/release-wpp-functional-v1/agent_direct_https.so)
 - [MANIFEST.md](LOCAL_CANDIDATE_ROOT/release-wpp-functional-v1/MANIFEST.md)
+
+说明：上述 `release-wpp-functional-v1` 是 2026-07-21 的历史候选，目录里仍保留当时生成的旧别名及其扫描记录。后续重新构建的候选包以 `cache.dat`、`krpt.dll`、profile DLL 和服务端插件为准，不再把旧别名列入交付文件。
 
 对应源码：
 

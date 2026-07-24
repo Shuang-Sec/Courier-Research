@@ -10,6 +10,8 @@
 
 ## Contents
 
+> 本清单描述的是 2026-07-21 历史候选，因而保留当时生成的 `krpt.agent.dll`。后续 release 清单只列出实际加载的 `krpt.dll`，旧别名不会再作为交付文件。
+
 - `cache.dat`: packaged profile/configuration
 - `krpt.dll`, `krpt.agent.dll`: WPS proxy artifacts
 - `agent_direct_https.so`: runtime plugin

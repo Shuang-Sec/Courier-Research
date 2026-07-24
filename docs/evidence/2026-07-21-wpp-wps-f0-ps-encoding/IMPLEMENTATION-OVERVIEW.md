@@ -60,7 +60,7 @@ processed / detected / errors
 
 三轮部署还分别完成了：
 
-- cache.dat、krpt.dll、krpt.agent.dll 静态扫描。
+- cache.dat、krpt.dll 静态扫描；旧候选的 krpt.agent.dll 扫描记录作为历史证据保留。
 - 系统内存扫描。
 - 720 秒回连监视。
 - WPP 和 WPS 两种主宿主的完整功能矩阵。
@@ -606,7 +606,6 @@ DIRECT_HTTPS_BEAT_DIALECT=2
 |---|---|
 | cache.dat | profile/configuration 打包结果 |
 | krpt.dll | WPS proxy 制品 |
-| krpt.agent.dll | WPS proxy 对应的 Agent 制品 |
 | agent_direct_https.so | Adaptix runtime plugin |
 | direct_https_profile.x64.dll | x64 profile DLL |
 | direct_https_profile.x64.bin | profile 的容器形式 |
@@ -624,7 +623,6 @@ LOCAL_CANDIDATE_ROOT/release-wpp-functional-v1
 |---|---:|---|
 | cache.dat | 79,896 | 5c89811ade759d5c1c6cc25f153357931f66320160da63e77c055c7d2193961b |
 | krpt.dll | 50,688 | b4bb6f1171cb80e9514c767110a3bb68c7e9a3688b9887f423d0fceb1cc46bac |
-| krpt.agent.dll | 50,688 | b4bb6f1171cb80e9514c767110a3bb68c7e9a3688b9887f423d0fceb1cc46bac |
 | agent_direct_https.so | 5,555,176 | d86807bff5a7e8e7ce146ce3b56b84a2400b42b3973c3d1f56c1973eefaa3779 |
 | direct_https_profile.x64.dll | 79,360 | 68a869ea61661679b80e7960e0d2ddcbef3c71e0fb9f7d59acbeb01af051860e |
 | direct_https_profile.x64.bin | 79,360 | ddedc93991527f2c08a4bb57e934d3023fe095dd7ac13cae59ec13c84126c5c7 |
@@ -642,7 +640,7 @@ LOCAL_CANDIDATE_ROOT/release-wpp-functional-v1
 4. 记录每个文件的大小和 SHA-256。
 5. 停止旧 WPP/WPS 会话并备份靶机文件。
 6. 部署新候选。
-7. 静态扫描 cache.dat、krpt.dll、krpt.agent.dll。
+7. 静态扫描 cache.dat、krpt.dll；旧候选的别名报告只用于历史审计。
 8. 执行 Scan_System_Memory。
 9. 等待已有扫描任务结束，再启动新的 Scan_Qscan。
 10. 启动 720 秒回连监视。
@@ -662,12 +660,11 @@ LOCAL_CANDIDATE_ROOT/release-wpp-functional-v1
 这个文件放在磁盘上时，扫描结果是什么？
 ~~~
 
-本轮扫描的三个对象是：
+后续候选的静态扫描对象是两个：
 
 ~~~text
 cache.dat
 krpt.dll
-krpt.agent.dll
 ~~~
 
 #### 系统内存扫描

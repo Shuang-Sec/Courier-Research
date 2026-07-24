@@ -27,9 +27,9 @@
 
 ### 2.1 静态文件扫描
 
-静态扫描直接读取 `cache.dat`、`krpt.dll` 和 `krpt.agent.dll`。它关注文件中的字节、结构、导入、字符串和已知静态特征。
+本报告对应的 2026-07-21 历史候选曾经静态扫描 `cache.dat`、`krpt.dll` 和 `krpt.agent.dll`。它关注文件中的字节、结构、导入、字符串和已知静态特征。根据 2026-07-23 的实时模块证据，后续候选只扫描和部署 `cache.dat`、`krpt.dll`。
 
-最终版三项静态扫描均为：
+这份历史候选的三项静态扫描均为：
 
 ```text
 Processed objects: 1
@@ -38,7 +38,7 @@ Errors:           0
 Return code:      0
 ```
 
-这个结果说明最终部署包的三个关键文件在单文件检查中均得到 `ok`。
+这个结果说明历史部署包的三个关键文件在单文件检查中均得到 `ok`；后续候选的文件集合会缩减为两个对象。
 
 ### 2.2 `Scan_System_Memory`
 
@@ -238,6 +238,8 @@ AV 对运行中进程的判断通常会综合多个信号：内存映像结构�
 
 ## 6. `full-lite-breakaway` 为什么是最重要的候选
 
+> 本节的静态扫描表格是旧候选的原始记录，保留 `krpt.agent.dll` 是为了让当时的门禁证据与文件清单能够一一对应。它不表示当前构建还会生成这个别名。
+
 `full-lite` 在 04:26 已得到：
 
 ```text
@@ -373,7 +375,7 @@ flowchart LR
 | --- | --- |
 | `cache.dat` | `5c89811ade759d5c1c6cc25f153357931f66320160da63e77c055c7d2193961b` |
 | `krpt.dll` | `b4bb6f1171cb80e9514c767110a3bb68c7e9a3688b9887f423d0fceb1cc46bac` |
-| `krpt.agent.dll` | `b4bb6f1171cb80e9514c767110a3bb68c7e9a3688b9887f423d0fceb1cc46bac` |
+| `krpt.agent.dll`（历史副本） | `b4bb6f1171cb80e9514c767110a3bb68c7e9a3688b9887f423d0fceb1cc46bac` |
 | `agent_direct_https.so` | `d86807bff5a7e8e7ce146ce3b56b84a2400b42b3973c3d1f56c1973eefaa3779` |
 | `direct_https_profile.x64.dll` | `68a869ea61661679b80e7960e0d2ddcbef3c71e0fb9f7d59acbeb01af051860e` |
 

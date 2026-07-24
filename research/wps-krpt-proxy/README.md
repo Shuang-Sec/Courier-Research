@@ -43,6 +43,8 @@ export CACHE_DAT=/path/to/preserved/cache.dat
 
 默认输出目录为 `research/wps-krpt-proxy/out-krpt/`，该目录属于本地构建输出。脚本通过环境变量 `REPO_ROOT`、`ML_ROOT`、`OUT`、`REAL_DLL` 和 `CACHE_DAT` 支持不同实验目录。
 
+当前输出策略只保留 `krpt.dll`。旧候选曾把它复制为 `krpt.agent.dll`，但 2026-07-23 的 WPS 实时模块枚举显示运行中的 `wps.exe` 全部加载 `krpt.dll`，没有加载旧别名；因此后续构建脚本会清理输出目录中的旧别名，不再复制或发布它。
+
 ## 关键实现点
 
 1. `DllMain` 只做轻量初始化和线程创建，复杂工作放到 loader 线程。

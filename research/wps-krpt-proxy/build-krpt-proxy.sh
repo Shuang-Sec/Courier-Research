@@ -47,12 +47,13 @@ cp -f "$CACHE_DAT" "$OUT/cache.dat"
   "$OUT/krpt_proxy.def" \
   -o "$OUT/krpt.dll"
 
-cp -f "$OUT/krpt.dll" "$OUT/krpt.agent.dll"
+# Remove the alias left by older candidates so the output directory has one
+# unambiguous WPS entry DLL.
+rm -f "$OUT/krpt.agent.dll"
 
 sha256sum \
   "$OUT/krpt_proxy.def" \
   "$OUT/dhpl_loader_profile_only.x64.o" \
   "$OUT/krpt.dll" \
-  "$OUT/krpt.agent.dll" \
   "$OUT/krpt_orig.dll" \
   "$OUT/cache.dat"

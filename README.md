@@ -58,7 +58,7 @@
 ### `research/wps-krpt-proxy/`
 保存 WPP/WPS 宿主代理层：
 
-- `krpt.dll` / `krpt.agent.dll` 入口包装
+- `krpt.dll` 入口包装；当前实时证据确认 WPS 加载的是这个模块
 - 原始 `krpt.dll` 导出 forwarder 生成
 - `DllMain -> loader thread -> dhpl_loader_main` 调用链
 - 带诊断和精简诊断两套构建入口

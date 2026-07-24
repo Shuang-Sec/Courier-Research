@@ -22,6 +22,8 @@
 
 ## 2. 留存目录结构
 
+> 这是对 2026-07-21 历史候选的完整留存清单，目录中的 `krpt.agent.dll`、哈希和扫描材料均属于当时的副本。后续新候选只生成和部署 `krpt.dll`。
+
 ~~~text
 preserved-latest-20260721/
 ├── PRESERVATION-MANIFEST.md

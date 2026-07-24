@@ -42,6 +42,8 @@ Qscan 的三个数字依次表示：`processed / detected / errors`。
 6. [INNOVATIONS-VS-ORIGINAL-ADAPTIX.md](INNOVATIONS-VS-ORIGINAL-ADAPTIX.md)：与原版 Adaptix beacon_agent 的设计对照。
 7. [KASPERSKY-PASS-ANALYSIS.md](KASPERSKY-PASS-ANALYSIS.md)：扫描阶段与结果分析。
 
+2026-07-23 的实时模块枚举见 [MODULE-LOAD-EVIDENCE-20260723.md](MODULE-LOAD-EVIDENCE-20260723.md)：本次运行中的 `wps.exe` 全部加载 `krpt.dll`，没有加载旧的 `krpt.agent.dll`。后续构建和部署只保留 `krpt.dll`；历史候选的别名、哈希和扫描日志继续作为历史证据保存。
+
 ## 证据边界
 
 这里保存的是去敏后的源码关联文档、指标摘要和哈希清单。原始扫描 stdout、远程部署日志、Windows 进程快照和最终 `dll/dat/so` 文件继续留在本地候选目录；它们的文件指纹已经整理进 `ARTIFACTS-AND-RUNS.md` 和 `RELEASE-SHA256SUMS`。

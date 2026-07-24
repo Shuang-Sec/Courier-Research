@@ -33,6 +33,8 @@ Build flags used by the profile stage include `DIRECT_HTTPS_LAZY_HTTP_SEND=1`, `
 
 ## Artifact hashes
 
+> 这是 2026-07-21 历史候选的完整指纹表，旧候选当时包含同字节的 `krpt.agent.dll`。实时模块证据显示 WPS 实际加载 `krpt.dll`；后续候选只保留 `krpt.dll`。
+
 | Artifact | Size | SHA-256 |
 |---|---:|---|
 | `cache.dat` | 79,896 | `5c89811ade759d5c1c6cc25f153357931f66320160da63e77c055c7d2193961b` |
@@ -46,6 +48,8 @@ Build flags used by the profile stage include `DIRECT_HTTPS_LAZY_HTTP_SEND=1`, `
 The complete x86 object hash list is in [artifact-hashes-profile-ps-encoding.txt](artifact-hashes-profile-ps-encoding.txt); the complete artifact list is in [artifact-hashes-ps-encoding.txt](artifact-hashes-ps-encoding.txt).
 
 ## Kaspersky gates
+
+> 下列静态扫描链接属于历史候选的原始结果。旧候选当时同时扫描过 `cache.dat`、`krpt.dll` 和 `krpt.agent.dll`；后续候选的扫描对象只包含前两项。
 
 All three artifact static scans processed one object, detected zero, reported zero errors, and returned code `0`:
 

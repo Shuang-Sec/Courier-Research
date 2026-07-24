@@ -54,9 +54,9 @@ jitter: 0
 | Runtime plugin | Teamserver 识别和驱动 Agent 的 Go 插件 | `agent_direct_https.so` |
 | Windows Agent | 在 WPP/WPS 内实际运行的 C++ 逻辑 | profile DLL 中的 Agent 代码 |
 | cache | loader 读取的打包容器 | `cache.dat` |
-| WPS proxy | 把 loader/profile 接入 WPS 宿主的 Windows DLL | `krpt.dll`、`krpt.agent.dll` |
+| WPS proxy | 把 loader/profile 接入 WPS 宿主的 Windows DLL | `krpt.dll` |
 
-一句话区分：`agent_direct_https.so` 主要在服务器侧，`cache.dat` 和两个 `krpt*.dll` 主要在靶机侧，profile DLL 是被打包进运行链的 Windows 代码载体。
+一句话区分：`agent_direct_https.so` 主要在服务器侧，`cache.dat` 和 `krpt.dll` 主要在靶机侧，profile DLL 是被打包进运行链的 Windows 代码载体。旧候选中的 `krpt.agent.dll` 只是历史副本，后续构建和部署不再使用它。
 
 ### 1.4 Check-in、callback 和 task
 
@@ -868,16 +868,17 @@ WPS proxy 构建阶段生成：
 
 ~~~text
 krpt.dll
-krpt.agent.dll
 ~~~
 
-两个文件当前大小都为 50,688 字节，SHA-256 都是：
+当前活动入口是 `krpt.dll`，历史候选曾经把同一个文件复制成 `krpt.agent.dll`。2026-07-23 的实时模块枚举显示运行中的 `wps.exe` 全部加载 `krpt.dll`，没有加载旧别名。
+
+当前 `krpt.dll` 的历史候选 SHA-256 为：
 
 ~~~text
 b4bb6f1171cb80e9514c767110a3bb68c7e9a3688b9887f423d0fceb1cc46bac
 ~~~
 
-它们属于宿主接入链路；cache.dat 提供被 loader 读取的 Agent/profile 内容，proxy DLL 负责把这条加载链带入 WPP/WPS 运行环境。
+它属于宿主接入链路；`cache.dat` 提供被 loader 读取的 Agent/profile 内容，proxy DLL 负责把这条加载链带入 WPP/WPS 运行环境。旧 `release-wpp-functional-v1` 目录仍保留别名文件和旧清单，用于还原当时的实验现场。
 
 ### 11.8 发布目录和完整性清单
 
@@ -888,7 +889,6 @@ b4bb6f1171cb80e9514c767110a3bb68c7e9a3688b9887f423d0fceb1cc46bac
 ~~~text
 cache.dat
 krpt.dll
-krpt.agent.dll
 agent_direct_https.so
 profile_dll/direct_https_profile.x64.dll
 profile_dll/direct_https_profile.x64.bin
@@ -931,7 +931,7 @@ Kaspersky CLI：C:\Program Files (x86)\Kaspersky Lab\Kaspersky 21.25\avp.com
 
 1. 停止当前 wpp.exe 与 wps.exe。
 2. 等待文件句柄释放。
-3. 给远程 cache.dat、krpt.dll、krpt.agent.dll 添加带时间戳的 .before-<timestamp> 备份。
+3. 给远程 cache.dat、krpt.dll 添加带时间戳的 .before-<timestamp> 备份；如果发现旧的 krpt.agent.dll，则在记录后清理。
 
 备份的价值是让本轮候选与上一轮运行文件可区分，也方便失败阶段保留现场。
 
@@ -959,14 +959,13 @@ Kaspersky CLI：C:\Program Files (x86)\Kaspersky Lab\Kaspersky 21.25\avp.com
 
 两边一致才进入扫描和启动阶段。
 
-### 12.4 写入的三个核心文件
+### 12.4 写入的两个核心文件
 
 当前部署阶段重点覆盖：
 
 ~~~text
 cache.dat
 krpt.dll
-krpt.agent.dll
 ~~~
 
 服务器侧的 agent_direct_https.so 和 profile 构建文件留在 Teamserver/构建目录；靶机侧按 WPS 运行链读取 cache 和 proxy 制品。
@@ -1109,7 +1108,6 @@ jitter
 ~~~text
 cache.dat
 krpt.dll
-krpt.agent.dll
 ~~~
 
 每个文件的通过条件：
@@ -1464,10 +1462,10 @@ artifacts/release-wpp-functional-v1/*
 [ ] 4. 构建 C++ x64/x86 对象
 [ ] 5. 生成 profile DLL 和 profile container
 [ ] 6. 打包 cache.dat
-[ ] 7. 构建 krpt.dll 与 krpt.agent.dll
+[ ] 7. 构建 krpt.dll
 [ ] 8. 生成 SHA256SUMS
 [ ] 9. 停止靶机 WPP/WPS 并备份远程文件
-[ ] 10. 部署三个核心文件并核对远程 SHA-256
+[ ] 10. 部署两个核心文件并核对远程 SHA-256
 [ ] 11. 执行三个 Kaspersky 门禁
 [ ] 12. 启动 WPP_ActiveV2_Live_Test_Limited
 [ ] 13. 监视 WPP/WPS 连续 callback
