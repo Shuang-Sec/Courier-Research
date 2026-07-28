@@ -101,9 +101,12 @@ COMMON_FLAGS := -I $(BEACON_DIR) \
 
 .PHONY: all clean pre x64 x86
 
-NPROC := $(shell nproc)
+# C++ 编译器的单个进程会占用较多内存。默认使用单并行，避免在
+# AdaptixClient 已经占用较多内存时由多个 cc1plus 同时触发系统 OOM。
+# 需要加快本地构建时可通过 DIRECT_HTTPS_JOBS=2（或更高值）覆盖。
+DIRECT_HTTPS_JOBS ?= 1
 ifeq ($(MAKELEVEL), 0)
-    MAKEFLAGS += -j$(NPROC) --no-print-directory
+    MAKEFLAGS += -j$(DIRECT_HTTPS_JOBS) --no-print-directory
 endif
 
 # all 目标：清理旧对象，准备模板/stub，然后同时生成 x64 和 x86 对象文件。

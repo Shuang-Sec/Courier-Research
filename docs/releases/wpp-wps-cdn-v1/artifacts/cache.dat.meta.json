@@ -1,0 +1,305 @@
+{
+  "format": "DHPL1",
+  "input": "/home/chenshuang/CTF/reports/cdn/wpp-wps-cdn-v1-20260724-111809/profile_dll/direct_https_profile.x64.dll",
+  "input_sha256": "63ba4e2bb1438bd331ceaa37d780e72edd6f04041991abeaf2cf79a8a532639d",
+  "preferred_image_base": "0x2e3e00000",
+  "image_size": 114688,
+  "size_of_headers": 1024,
+  "entry_point_rva": "0x1200",
+  "run_agent_rva": "0x1340",
+  "export_name_scrubbed": false,
+  "export_name_file_offset": "0x12c4f",
+  "section_count": 10,
+  "reloc_count": 63,
+  "import_count": 24,
+  "tls_callback_count": 2,
+  "exception_rva": "0x15000",
+  "exception_size": 432,
+  "plain_size": 79808,
+  "plain_sha256": "5ea4cdbf59f72229b4088e41b1cee7d89a5d0114d99c8548fe4c28638f4bd3b1",
+  "plain_first16": "4c5739154b0000000100000064860000",
+  "sections": [
+    {
+      "name": ".text",
+      "virtual_address": "0x1000",
+      "virtual_size": 61792,
+      "mapped_size": 61952,
+      "raw_size": 61952,
+      "data_size": 61952,
+      "characteristics": "0x60000020",
+      "protection": "0x20"
+    },
+    {
+      "name": ".data",
+      "virtual_address": "0x11000",
+      "virtual_size": 8480,
+      "mapped_size": 8704,
+      "raw_size": 8704,
+      "data_size": 8704,
+      "characteristics": "0xc0000040",
+      "protection": "0x4"
+    },
+    {
+      "name": ".rdata",
+      "virtual_address": "0x14000",
+      "virtual_size": 3976,
+      "mapped_size": 4096,
+      "raw_size": 4096,
+      "data_size": 4096,
+      "characteristics": "0x40000040",
+      "protection": "0x2"
+    },
+    {
+      "name": ".pdata",
+      "virtual_address": "0x15000",
+      "virtual_size": 432,
+      "mapped_size": 512,
+      "raw_size": 512,
+      "data_size": 512,
+      "characteristics": "0x40000040",
+      "protection": "0x2"
+    },
+    {
+      "name": ".xdata",
+      "virtual_address": "0x16000",
+      "virtual_size": 352,
+      "mapped_size": 512,
+      "raw_size": 512,
+      "data_size": 512,
+      "characteristics": "0x40000040",
+      "protection": "0x2"
+    },
+    {
+      "name": ".bss",
+      "virtual_address": "0x17000",
+      "virtual_size": 192,
+      "mapped_size": 192,
+      "raw_size": 0,
+      "data_size": 0,
+      "characteristics": "0xc0000080",
+      "protection": "0x4"
+    },
+    {
+      "name": ".edata",
+      "virtual_address": "0x18000",
+      "virtual_size": 91,
+      "mapped_size": 512,
+      "raw_size": 512,
+      "data_size": 512,
+      "characteristics": "0x40000040",
+      "protection": "0x2"
+    },
+    {
+      "name": ".idata",
+      "virtual_address": "0x19000",
+      "virtual_size": 972,
+      "mapped_size": 1024,
+      "raw_size": 1024,
+      "data_size": 1024,
+      "characteristics": "0x40000040",
+      "protection": "0x2"
+    },
+    {
+      "name": ".tls",
+      "virtual_address": "0x1a000",
+      "virtual_size": 16,
+      "mapped_size": 512,
+      "raw_size": 512,
+      "data_size": 512,
+      "characteristics": "0xc0000040",
+      "protection": "0x4"
+    },
+    {
+      "name": ".reloc",
+      "virtual_address": "0x1b000",
+      "virtual_size": 136,
+      "mapped_size": 512,
+      "raw_size": 512,
+      "data_size": 512,
+      "characteristics": "0x42000040",
+      "protection": "0x2"
+    }
+  ],
+  "imports": [
+    {
+      "module": "KERNEL32.dll",
+      "name": "DeleteCriticalSection",
+      "iat_rva": "0x19110"
+    },
+    {
+      "module": "KERNEL32.dll",
+      "name": "EnterCriticalSection",
+      "iat_rva": "0x19118"
+    },
+    {
+      "module": "KERNEL32.dll",
+      "name": "GetLastError",
+      "iat_rva": "0x19120"
+    },
+    {
+      "module": "KERNEL32.dll",
+      "name": "GetModuleHandleA",
+      "iat_rva": "0x19128"
+    },
+    {
+      "module": "KERNEL32.dll",
+      "name": "GetProcAddress",
+      "iat_rva": "0x19130"
+    },
+    {
+      "module": "KERNEL32.dll",
+      "name": "InitializeCriticalSection",
+      "iat_rva": "0x19138"
+    },
+    {
+      "module": "KERNEL32.dll",
+      "name": "LeaveCriticalSection",
+      "iat_rva": "0x19140"
+    },
+    {
+      "module": "KERNEL32.dll",
+      "name": "LoadLibraryA",
+      "iat_rva": "0x19148"
+    },
+    {
+      "module": "KERNEL32.dll",
+      "name": "LocalAlloc",
+      "iat_rva": "0x19150"
+    },
+    {
+      "module": "KERNEL32.dll",
+      "name": "LocalFree",
+      "iat_rva": "0x19158"
+    },
+    {
+      "module": "KERNEL32.dll",
+      "name": "LocalReAlloc",
+      "iat_rva": "0x19160"
+    },
+    {
+      "module": "KERNEL32.dll",
+      "name": "Sleep",
+      "iat_rva": "0x19168"
+    },
+    {
+      "module": "KERNEL32.dll",
+      "name": "TlsGetValue",
+      "iat_rva": "0x19170"
+    },
+    {
+      "module": "KERNEL32.dll",
+      "name": "VirtualProtect",
+      "iat_rva": "0x19178"
+    },
+    {
+      "module": "KERNEL32.dll",
+      "name": "VirtualQuery",
+      "iat_rva": "0x19180"
+    },
+    {
+      "module": "msvcrt.dll",
+      "name": "__iob_func",
+      "iat_rva": "0x19190"
+    },
+    {
+      "module": "msvcrt.dll",
+      "name": "_amsg_exit",
+      "iat_rva": "0x19198"
+    },
+    {
+      "module": "msvcrt.dll",
+      "name": "_initterm",
+      "iat_rva": "0x191a0"
+    },
+    {
+      "module": "msvcrt.dll",
+      "name": "_lock",
+      "iat_rva": "0x191a8"
+    },
+    {
+      "module": "msvcrt.dll",
+      "name": "_unlock",
+      "iat_rva": "0x191b0"
+    },
+    {
+      "module": "msvcrt.dll",
+      "name": "abort",
+      "iat_rva": "0x191b8"
+    },
+    {
+      "module": "msvcrt.dll",
+      "name": "fprintf",
+      "iat_rva": "0x191c0"
+    },
+    {
+      "module": "msvcrt.dll",
+      "name": "strncmp",
+      "iat_rva": "0x191c8"
+    },
+    {
+      "module": "msvcrt.dll",
+      "name": "vfprintf",
+      "iat_rva": "0x191d0"
+    }
+  ],
+  "tls_callbacks": [
+    "0x1390",
+    "0x1370"
+  ],
+  "reloc_sample": [
+    "0x149c0",
+    "0x149e0",
+    "0x149e8",
+    "0x149f0",
+    "0x149f8",
+    "0x14b80",
+    "0x14b90",
+    "0x14ba0",
+    "0x14bb0",
+    "0x14bc0",
+    "0x14bd0",
+    "0x14be0",
+    "0x14bf0",
+    "0x14c00",
+    "0x14c10",
+    "0x14c20",
+    "0x14c30",
+    "0x14c40",
+    "0x14c50",
+    "0x14c60",
+    "0x14c70",
+    "0x14c78",
+    "0x14c80",
+    "0x14c90",
+    "0x14c98",
+    "0x14ca0",
+    "0x14ca8",
+    "0x14cb0",
+    "0x14cc0",
+    "0x14cc8",
+    "0x14cd0",
+    "0x14ce0"
+  ],
+  "output": "/home/chenshuang/CTF/reports/cdn/wpp-wps-cdn-v1-20260724-111809/cache.dat",
+  "output_sha256": "0b8a1f17ab9102c67a454a5e8392744b18364783bb17475d97a670a491288826",
+  "output_size": 79896,
+  "encryption": {
+    "envelope": "DHPLE2",
+    "algorithm": "AES-256-GCM",
+    "key_derivation": "PBKDF2-HMAC-SHA256(passphrase, salt, iterations)",
+    "aad_hex": "793b730c264c27104873636a0a330e21063c02536d67161a",
+    "salt_hex": "452b5b57ac6dc29e3d6b336375ca38e3",
+    "iterations": 100000,
+    "nonce_hex": "277376b84acddd5b1d958843",
+    "tag_hex": "2b6016357d36239ee3368237ceb3b8f3",
+    "ciphertext_size": 79808,
+    "envelope_header_size": 44
+  },
+  "encrypted_first16": "485d72056a0200000200000002000000",
+  "disk_starts_with_mz": false,
+  "disk_starts_with_dhpl": false,
+  "disk_starts_with_dhple": true,
+  "disk_starts_with_dhple2": true,
+  "decrypted_starts_with_mz": false,
+  "decrypted_starts_with_dhpl": true
+}

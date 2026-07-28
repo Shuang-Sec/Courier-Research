@@ -1,0 +1,33 @@
+[Unit]
+Description=Adaptix local CDN-like HTTPS proxy for WPP/WPS direct_https
+Documentation=file:///home/chenshuang/CTF/reports/cdn/wpp-wps-cdn-v1-20260724-111809/RESULT.md
+Wants=adaptixserver.service
+After=adaptixserver.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/home/chenshuang/CTF/reports/cdn/wpp-wps-cdn-v1-20260724-111809
+ExecStart=/usr/bin/python3 /home/chenshuang/CTF/reports/cdn/wpp-wps-cdn-v1-20260724-111809/cdn_https_proxy.py --listen-host 0.0.0.0 --listen-port 9443 --origin-host 127.0.0.1 --origin-port 8448 --origin-host-header cdn-lab.local:9443 --cert /home/chenshuang/CTF/reports/cdn/wpp-wps-cdn-v1-20260724-111809/cdn-edge.crt --key /home/chenshuang/CTF/reports/cdn/wpp-wps-cdn-v1-20260724-111809/cdn-edge.key --log /home/chenshuang/CTF/reports/cdn/wpp-wps-cdn-v1-20260724-111809/proxy.log
+ExecStartPost=/bin/sh -c 'for i in $(/usr/bin/seq 1 40); do /usr/bin/ss -lnt sport = :9443 | /usr/bin/grep -q LISTEN && /usr/bin/ss -lnt sport = :8448 | /usr/bin/grep -q LISTEN && exit 0; /bin/sleep 0.25; done; exit 1'
+Restart=always
+RestartSec=5s
+KillSignal=SIGTERM
+TimeoutStopSec=10s
+Environment=PYTHONUNBUFFERED=1
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=adaptix-cdn-proxy
+
+[Install]
+WantedBy=default.target
+
+# 部署前准备：
+# 1. 把候选报告目录、cdn-edge.crt 和本机私有 cdn-edge.key 放到对应路径。
+# 2. 确认 adaptixserver.service 已能启动 8448 origin listener。
+# 3. 复制为 ~/.config/systemd/user/adaptix-cdn-proxy.service。
+# 4. 执行 systemctl --user daemon-reload && systemctl --user enable --now adaptix-cdn-proxy.service。
+# 私钥只保存在本机，不进入本 Git 版本。

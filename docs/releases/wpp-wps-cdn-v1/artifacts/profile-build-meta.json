@@ -1,0 +1,87 @@
+{
+  "built_at": "2026-07-24T11:32:41+0800",
+  "listener": "cdn_wpp_wps_v1_20260724_8448",
+  "sleep": "10s",
+  "jitter": 0,
+  "probe_stage": -1,
+  "sandbox_probe_stage": -1,
+  "memory_loader_diag": false,
+  "fast_first_loops": 0,
+  "agent_src": "/home/chenshuang/CTF/AdaptixC2/AdaptixServer/extenders/direct_https_agent/src_beacon",
+  "agent_config": "/home/chenshuang/CTF/AdaptixC2/AdaptixServer/extenders/direct_https_agent/config.yaml",
+  "beat_dialect": 2,
+  "api_hashing": false,
+  "lazy_wininet_init": true,
+  "lite_connector": true,
+  "learning_minimal": false,
+  "file_commands_only": false,
+  "heartbeat_only": false,
+  "hello_only": false,
+  "linked_modules": [
+    "config",
+    "Agent",
+    "AgentConfig",
+    "AgentInfo",
+    "ApiLoader",
+    "Commander",
+    "ConnectorHTTP",
+    "Crypt",
+    "Downloader",
+    "Encoders",
+    "JobsController",
+    "MainAgent",
+    "MemorySaver",
+    "Packer",
+    "ProcLoader",
+    "WaitMask",
+    "crt",
+    "std",
+    "utils",
+    "direct_https_dll_entry"
+  ],
+  "initial_checkin_range_ms": null,
+  "profile": {
+    "listener_name": "cdn_wpp_wps_v1_20260724_8448",
+    "listener_watermark": "0cbca9ca",
+    "agent_watermark": "d17ec7ed",
+    "sleep_seconds": 10,
+    "jitter": 0,
+    "hosts_ports": [
+      [
+        "192.168.220.10",
+        9443
+      ]
+    ],
+    "http_method": "POST",
+    "uris": [
+      "/api/v1/status",
+      "/updates/check.php",
+      "/content.html"
+    ],
+    "user_agents": [
+      "Mozilla/5.0 (Windows NT 6.2; rv:20.0) Gecko/20121202 Firefox/20.0"
+    ],
+    "hb_header": "X-Beacon-Id",
+    "request_headers_len": 0,
+    "host_headers": [
+      "cdn-lab.local:9443"
+    ],
+    "profile_size": 298,
+    "crypt_params_size": 278
+  },
+  "dll": {
+    "path": "/home/chenshuang/CTF/reports/cdn/wpp-wps-cdn-v1-20260724-111809/profile_dll/direct_https_profile.x64.dll",
+    "sha256": "63ba4e2bb1438bd331ceaa37d780e72edd6f04041991abeaf2cf79a8a532639d",
+    "size": 79360
+  },
+  "bin": {
+    "path": "/home/chenshuang/CTF/reports/cdn/wpp-wps-cdn-v1-20260724-111809/profile_dll/direct_https_profile.x64.bin",
+    "sha256": "c426eea160b47b18cebf2e31d20397779dcba85b80fcbedec474d4edf0a96218",
+    "size": 79360
+  },
+  "profile_bin": {
+    "path": "/home/chenshuang/CTF/reports/cdn/wpp-wps-cdn-v1-20260724-111809/profile_dll/profile.bin",
+    "sha256": "aba7ded7c178436aaa8f7af788e90452a3994bd8373ccb8edb6032a9e9a61150",
+    "size": 298
+  }
+}
