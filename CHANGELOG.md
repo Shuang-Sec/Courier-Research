@@ -21,6 +21,8 @@
 - 两个 WPS proxy 构建脚本移除别名复制和别名哈希输出，并清理旧输出目录中的 `krpt.agent.dll`。
 - 部署脚本只传输、扫描和校验 `cache.dat`、`krpt.dll`；远程目录中残留的旧别名会在部署开始时清理。
 - 新增 `MODULE-LOAD-EVIDENCE-20260723.md`；历史候选的别名文件、哈希和扫描日志继续保留，避免混淆历史事实与当前输出。
+- 更新 `README.md` 研究进展：新增 AcroTray 四文件宿主、协议 v6/v7、运行期 sleep/jitter 命令与 PDF 投放入口三条进展线（2026-09-03，基于本地技术文档汇总），并增加「快照边界与下一步」小节，说明相关源码尚未导出。
+- `git remote origin` 由 dignity666 迁移至 Shuang-Sec 账号 URL（同一仓库，账号改名）。
 
 ### Planned
 

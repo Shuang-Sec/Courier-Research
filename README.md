@@ -10,6 +10,9 @@
 - `DHPL1 -> AES-GCM -> DHPLE2(PBKDF2 + salt + AES-GCM)` 容器演进
 - PE header 痕迹处理与内存形态验证
 - WPP/WPS `krpt.dll` 代理层、`cache.dat` 加密容器和 direct_https Agent 回连链路
+- AcroTray 四文件宿主实验（宿主 + loader 入口 DLL + 原始 DLL + 加密 profile 容器）
+- direct_https 通信协议 v6/v7 与运行期 sleep/jitter 命令
+- PDF 投放入口实验（URI 动作引导下载 / PDF 尾部内嵌本地提取 / 快捷方式形态交付）
 
 这个仓库的目标不是保留本地全部运行环境，而是提供一个**可追溯、可阅读、可二次整理**的源码与文档基线。
 
@@ -108,9 +111,11 @@
 
 ---
 
-## 3. 当前版本的核心结论
+## 3. 研究进展与当前结论
 
-这一版的研究重点主要有 4 个：
+### 3.1 WPP/WPS 主宿主基线（本仓库当前代码快照对应版本）
+
+这一版的研究重点主要有 5 个：
 
 1. **direct_https 的源码与运行链已经被拆清楚**
    - 包括 agent 初始化、命令面、通信面、构建链和重新生成流程。
@@ -128,6 +133,28 @@
    - 最新候选覆盖当前注册的 14 项命令。
    - 三次独立新鲜部署均完成 WPP/WPS 主宿主矩阵、文件传输和 Kaspersky 门禁。
    - 详细证据入口：[2026-07-21 WPP/WPS F0-F3 evidence](docs/evidence/2026-07-21-wpp-wps-f0-ps-encoding/README.md)
+
+### 3.2 AcroTray 四文件宿主与协议演进（2026-08 进展，源码尚未导出）
+
+在 WPP/WPS 基线之外，研究主线继续推进到新的宿主与通信层，当前进展如下（对应源码仍在本地工作树，尚未导出到本仓库，见 3.4）：
+
+1. **AcroTray 四文件宿主**：以带签名的轻量宿主 + DLL 侧加载组合作为新入口——宿主、loader 入口 DLL、原始 DLL 备份与加密 profile 容器（`cache.dat`）四文件即完整运行包；运行期复用 `profile-only loader` 的既有链路（`DHPLE2 -> PBKDF2 -> AES-256-GCM -> DHPL1 -> section 映射 -> RunAgentDll`）。
+2. **协议 v6/v7 工程化**：把心跳、任务、结果整理为带显式 schema、长度、record 边界、CRC32 与消息关联（message_id / reply_to）的版本化帧；统一帧头与校验规则；保留旧版本回退；命令语义层保持稳定，14 项功能全量回归。
+3. **运行期 sleep/jitter 命令**：恢复运行期可调的 sleep 命令，与 profile 中 sleep/jitter 默认值配合，高频交互与低频静默场景可按需切换。
+4. **远端运行面迁移**：Teamserver 运行面按「本机源码构建 + 远端仅部署编译产物」的边界部署到远端 Linux 主机，Agent 直连远端监听器；源码、构建脚本与 Git 历史全部保留在本机。
+
+### 3.3 PDF 投放入口实验（2026-08 进展，源码尚未导出）
+
+- 以 PDF 文档的 URI 动作作为 agent 四文件包的获取入口；PDF 显示内容与触发逻辑分离——显示内容可替换为任意正常文档页面，触发逻辑保持不变。
+- 入口文件的下载服务可部署在任意可达的 HTTP stage；后续演进到「入口文件直接内嵌 PDF 尾部、打开后本地提取」的单文件形态，以及「外观为 PDF 的快捷方式 + 隐藏载荷目录」的交付形态。
+- 靶机侧链路按「下载 → 四文件哈希校验 → 部署 → 宿主启动 → 回连」分层验证，把“下载成功”与“上线成功”分开取证。
+- 验证：真实靶机上完成 14 项功能矩阵回归与 Kaspersky / Windows Defender 门禁。
+
+### 3.4 快照边界与下一步
+
+- 本仓库当前保存的代码与脚本仍对应 **WPP/WPS 基线**（最近一次同步为 2026-07-23）；上文 3.2 / 3.3 涉及的 AcroTray 宿主、协议 v7、sleep 命令与 PDF 入口相关源码**尚未导出到本仓库**。
+- 研究进展叙述只做原理层记录：真实地址、凭据、检测名与对抗迭代细节、Windows 落地样本均不进入本仓库。
+- 下一步：在本地确认新稳定基线后，按 `docs/binary-release-policy.md` 与去敏流程导出新快照，届时同步更新 `docs/research-summary.md`、`docs/repo-map.md`、`docs/research-roadmap.md`。
 
 ---
 
