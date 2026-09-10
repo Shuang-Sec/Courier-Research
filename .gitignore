@@ -18,6 +18,10 @@ __pycache__/
 *.pdb
 *.o
 *.a
+*.so
+*.pdl
+*.msi
+*.sys
 *.log
 *.tmp
 *.zip
